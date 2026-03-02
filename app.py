@@ -15,10 +15,34 @@ st.markdown("""
         background-color: #f8f9fa;
     }
     .stMetric {
-        background-color: #ffffff;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        background-color: #31333F;
+        color: white !important;
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .stMetric [data-testid="stMetricValue"] {
+        color: white !important;
+        font-size: 1.5rem !important;
+    }
+    .stMetric [data-testid="stMetricLabel"] {
+        color: #e0e0e0 !important;
+        font-size: 0.8rem !important;
+    }
+    .stMetric [data-testid="stMetricDelta"] {
+        font-size: 0.8rem !important;
+    }
+    div[data-testid="column"] {
+        padding: 0 5px !important;
+        flex: 1 1 0% !important;
+        min-width: 0 !important;
+    }
+    [data-testid="stMetricValue"] {
+        overflow-wrap: anywhere !important;
+    }
+    div[data-testid="stHorizontalBlock"] {
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
     }
     div[data-testid="stExpander"] {
         border: none !important;
