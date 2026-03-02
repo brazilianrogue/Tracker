@@ -6,8 +6,35 @@ from datetime import datetime, timedelta
 import json
 import re
 
-# --- 1. Page Configuration ---
+# --- 1. Page Configuration & Custom CSS ---
 st.set_page_config(page_title="Nutrition Tracker", page_icon="🍏", layout="centered")
+
+st.markdown("""
+    <style>
+    .main {
+        background-color: #f8f9fa;
+    }
+    .stMetric {
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    div[data-testid="stExpander"] {
+        border: none !important;
+        box-shadow: none !important;
+        background-color: transparent !important;
+    }
+    .stButton button {
+        border-radius: 20px;
+        font-weight: 600;
+    }
+    header[data-testid="stHeader"] {
+        background: rgba(255, 255, 255, 0.8);
+        backdrop-filter: blur(10px);
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 # --- 2. API Setup ---
 @st.cache_resource
@@ -118,16 +145,51 @@ JSON Output for Database Logging:
 - Only include the JSON block if new food is being logged.
 """
 
-# --- 4. UI Header & Dashboard ---
-st.title("Nutrition & Fasting Tracker")
-st.caption("AI-Powered Logging & Protein Density Engine")
+# --- 4. Sidebar & Profile ---
+with st.sidebar:
+    st.header("⚙️ Protocol & Goals")
+    st.info("""
+    **Standard Protocol:**
+    18:6 Fast (12PM - 6PM)
+    
+    **Special Days:**
+    - Mon: 42hr "Skip Day"
+    - Fri: OMAD @ 6PM
+    
+    **Daily Targets:**
+    - Cals: <= 1500
+    - Protein: >= 150g
+    - Density: >= 10.0%
+    """)
 
-st.subheader("Trailing 7 Days Dashboard")
+# --- 4. Modernized Header & Dashboard ---
+st.markdown("### 🍏 **Nutrition** & Fasting")
+
 df_7days = get_trailing_7_days_data()
-if not df_7days.empty:
-    st.dataframe(df_7days, use_container_width=True, hide_index=True)
+
+# Calculate today's metrics
+today_str = datetime.now().strftime("%Y-%m-%d")
+today_data = df_7days[df_7days['Date'] == today_str]
+
+if not today_data.empty:
+    cals = int(today_data.iloc[0]['Calories'])
+    protein = int(today_data.iloc[0]['Protein'])
+    density = today_data.iloc[0]['Density']
 else:
-    st.info("No data for the last 7 days yet.")
+    cals, protein, density = 0, 0, "0.0%"
+
+# Metric Row
+m1, m2, m3 = st.columns(3)
+m1.metric("Calories", f"{cals}", f"{1500 - cals} left" if cals < 1500 else f"+{cals - 1500} over", delta_color="inverse")
+m2.metric("Protein", f"{protein}g", f"{protein - 150}g" if protein >= 150 else f"{protein - 150}g", delta_color="normal")
+m3.metric("Density", density, delta=None)
+
+# Collapsible Weekly History
+with st.expander("📊 Weekly History", expanded=False):
+    if not df_7days.empty:
+        st.dataframe(df_7days, use_container_width=True, hide_index=True)
+    else:
+        st.info("No logs found for the trailing 7 days.")
 
 st.divider()
 
