@@ -285,7 +285,7 @@ SYSTEM_PROMPT = get_system_prompt(fasting_schedule)
 # --- 4. Sidebar & Profile ---
 with st.sidebar:
     try:
-        st.image("logo.png", use_container_width=True)
+        st.image("logo.png", width="stretch")
     except:
         pass
     st.header("⚙️ RatioTen Protocol")
@@ -402,7 +402,7 @@ if lowest_w:
 # Collapsible Weekly History
 with st.expander("📊 Weekly History", expanded=False):
     if not df_7days.empty:
-        st.dataframe(df_7days, use_container_width=True, hide_index=True)
+        st.dataframe(df_7days, width="stretch", hide_index=True)
     else:
         st.info("No logs found for the trailing 7 days.")
 
