@@ -17,10 +17,10 @@ st.markdown("""
     .stMetric {
         background-color: #31333F;
         color: white !important;
-        padding: 8px !important;
+        padding: 5px !important;
         border-radius: 8px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        min-height: 100px;
+        min-height: 90px;
         display: flex !important;
         flex-direction: column !important;
         justify-content: flex-start !important;
@@ -28,32 +28,34 @@ st.markdown("""
     }
     .stMetric [data-testid="stMetricValue"] {
         color: white !important;
-        font-size: 1.1rem !important;
-        line-height: 1.2 !important;
+        font-size: 1rem !important;
+        line-height: 1 !important;
     }
     .stMetric [data-testid="stMetricLabel"] {
         color: #e0e0e0 !important;
-        font-size: 0.7rem !important;
+        font-size: 0.65rem !important;
         margin-bottom: 2px !important;
     }
     .stMetric [data-testid="stMetricDelta"] {
-        font-size: 0.7rem !important;
+        font-size: 0.65rem !important;
+        line-height: 1 !important;
     }
-    div[data-testid="column"] {
-        padding: 0 2px !important;
-        flex: 1 1 32% !important;
-        max-width: 33% !important;
-        min-width: 0 !important;
-    }
-    [data-testid="stMetricValue"] {
-        overflow-wrap: anywhere !important;
-    }
+    /* Force 3-column row on small screens */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
+        justify-content: space-between !important;
         align-items: flex-start !important;
         gap: 4px !important;
+    }
+    div[data-testid="column"] {
+        width: 32% !important;
+        flex: 0 0 32% !important;
+        min-width: 0 !important;
+    }
+    [data-testid="stMetricValue"] {
+        overflow-wrap: anywhere !important;
     }
     div[data-testid="stExpander"] {
         border: none !important;
