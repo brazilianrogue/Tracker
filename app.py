@@ -129,6 +129,26 @@ def get_trailing_7_days_data():
     except Exception as e:
         return pd.DataFrame()
 
+def get_lowest_weight():
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        try:
+            worksheet = sh.worksheet("Weight_Logs")
+        except gspread.WorksheetNotFound:
+            return None
+            
+        data = worksheet.get_all_records()
+        if not data:
+            return None
+            
+        # Extract numeric weight from column B (Weight (lbs))
+        weights = [float(row.get("Weight (lbs)", 999)) for row in data]
+        return min(weights) if weights else None
+    except Exception as e:
+        return None
+
 def log_to_sheet(item, calories, protein, density):
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
@@ -252,6 +272,15 @@ metric_html = f"""
 </div>
 """
 st.markdown(metric_html, unsafe_allow_html=True)
+
+# Record Low Metric (if available)
+lowest_w = get_lowest_weight()
+if lowest_w:
+    st.markdown(f"""
+    <div style="background-color: #31333F; color: #00A6FF; padding: 10px; border-radius: 8px; text-align: center; margin-bottom: 20px; font-weight: bold; border: 1px solid #00A6FF;">
+        🌟 Record Lowest Weight: {lowest_w} lbs
+    </div>
+    """, unsafe_allow_html=True)
 
 # Collapsible Weekly History
 with st.expander("📊 Weekly History", expanded=False):
