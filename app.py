@@ -6,8 +6,11 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import json
 import re
+import time
 
 EASTERN = ZoneInfo("America/New_York")
+PRIMARY_MODEL = "gemini-2.0-flash-thinking-exp-01-21"
+FALLBACK_MODEL = "gemini-2.0-flash"
 
 # --- 1. Page Configuration & Custom CSS ---
 st.set_page_config(page_title="RatioTen", page_icon="🔟", layout="centered")
@@ -94,6 +97,8 @@ client = get_client()
 # --- Database Setup ---
 @st.cache_data(ttl=60)
 def get_trailing_7_days_data():
+    # Define expected columns
+    expected_cols = ["Date", "Item", "Calories", "Protein", "Density"]
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(credentials_dict)
@@ -102,14 +107,14 @@ def get_trailing_7_days_data():
         
         values = worksheet.get_all_values()
         if not values:
-            return pd.DataFrame()
+            return pd.DataFrame(columns=expected_cols)
             
         df = pd.DataFrame(values)
         if df.iloc[0, 0] in ["Date", "date", "Time", "timestamp", "today"]:
             df.columns = df.iloc[0]
             df = df[1:]
         else:
-            df.columns = ["Date", "Item", "Calories", "Protein", "Density"]
+            df.columns = expected_cols
             
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.date
         df['Calories'] = pd.to_numeric(df['Calories'], errors='coerce').fillna(0)
@@ -119,18 +124,25 @@ def get_trailing_7_days_data():
         df = df[df['Date'] >= seven_days_ago]
         
         if df.empty:
-            return pd.DataFrame()
+            return pd.DataFrame(columns=expected_cols)
             
         daily_summary = df.groupby('Date')[['Calories', 'Protein']].sum().reset_index()
+        daily_summary['Date'] = daily_summary['Date'].astype(str)
         daily_summary['Density'] = (daily_summary['Protein'] / daily_summary['Calories']) * 100
         daily_summary['Density'] = daily_summary['Density'].fillna(0).apply(lambda x: f"{x:.1f}%")
         
         daily_summary = daily_summary.sort_values(by='Date', ascending=False)
-        daily_summary['Date'] = daily_summary['Date'].astype(str)
+        
+        # Ensure all expected columns are present
+        for col in expected_cols:
+            if col not in daily_summary.columns:
+                daily_summary[col] = 0 if col in ["Calories", "Protein"] else "0.0%" if col == "Density" else ""
+
         return daily_summary
         
     except Exception as e:
-        return pd.DataFrame()
+        st.error(f"Error fetching logs: {e}")
+        return pd.DataFrame(columns=expected_cols)
 
 def get_lowest_weight():
     try:
@@ -197,23 +209,29 @@ def get_fasting_status(schedule):
     today_sched = schedule.get(day_name, {"start": None, "end": None})
     
     if today_sched["start"] and today_sched["end"]:
-        start_time = datetime.strptime(today_sched["start"], "%H:%M").time()
-        end_time = datetime.strptime(today_sched["end"], "%H:%M").time()
-        current_time = now.time()
-        
-        if start_time <= current_time < end_time:
-            end_dt = datetime.combine(now.date(), end_time, tzinfo=EASTERN)
-            return "Eating Window Active", end_dt.timestamp() * 1000
+        try:
+            start_time = datetime.strptime(today_sched["start"], "%H:%M").time()
+            end_time = datetime.strptime(today_sched["end"], "%H:%M").time()
+            current_time = now.time()
+            
+            if start_time <= current_time < end_time:
+                end_dt = datetime.combine(now.date(), end_time, tzinfo=EASTERN)
+                return "Eating Window Active", end_dt.timestamp() * 1000
+        except:
+            pass
 
     for i in range(8):
         check_date = now + timedelta(days=i)
         check_day = check_date.strftime("%A")
         sched = schedule.get(check_day, {"start": None, "end": None})
         if sched["start"]:
-            start_time = datetime.strptime(sched["start"], "%H:%M").time()
-            start_dt = datetime.combine(check_date.date(), start_time, tzinfo=EASTERN)
-            if start_dt > now:
-                return "Fasting Active", start_dt.timestamp() * 1000
+            try:
+                start_time = datetime.strptime(sched["start"], "%H:%M").time()
+                start_dt = datetime.combine(check_date.date(), start_time, tzinfo=EASTERN)
+                if start_dt > now:
+                    return "Fasting Active", start_dt.timestamp() * 1000
+            except:
+                continue
     
     return "No Schedule", None
 
@@ -346,7 +364,7 @@ timer_html = f"""
     
     updateTimer();
     setInterval(updateTimer, 1000);
-}})();
+}} domestic)();
 </script>
 """
 st.components.v1.html(timer_html, height=120)
@@ -354,13 +372,15 @@ st.components.v1.html(timer_html, height=120)
 df_7days = get_trailing_7_days_data()
 
 # Calculate today's metrics
-today_str = datetime.now(EASTERN).strftime("%Y-%m-%d")
-today_data = df_7days[df_7days['Date'] == today_str]
-
-if not today_data.empty:
-    cals = int(today_data.iloc[0]['Calories'])
-    protein = int(today_data.iloc[0]['Protein'])
-    density = today_data.iloc[0]['Density']
+today_str = datetime.now(EASTERN) .strftime("%Y-%m-%d")
+if not df_7days.empty and 'Date' in df_7days.columns:
+    today_data = df_7days[df_7days['Date'] == today_str]
+    if not today_data.empty:
+        cals = int(today_data.iloc[0].get('Calories', 0))
+        protein = int(today_data.iloc[0].get('Protein', 0))
+        density = today_data.iloc[0].get('Density', '0.0%')
+    else:
+        cals, protein, density = 0, 0, "0.0%"
 else:
     cals, protein, density = 0, 0, "0.0%"
 
@@ -414,13 +434,24 @@ if "messages" not in st.session_state:
         {"role": "assistant", "content": "Ready to log. What are we eating?"}
     ]
 
-if "chat_session" not in st.session_state:
-    st.session_state.chat_session = client.chats.create(
-        model="gemini-3-flash-preview",
-        config=genai.types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-        )
+@st.cache_resource
+def get_chat_session(model_id):
+    # Using the Thinking model config to replicate iOS app experience
+    config = genai.types.GenerateContentConfig(
+        system_instruction=SYSTEM_PROMPT,
     )
+    # Note: For Thinking models specifically, we want to ensure the assistant 
+    # takes advantage of the reasoning capabilities.
+    return client.chats.create(
+        model=model_id,
+        config=config
+    )
+
+if "current_model" not in st.session_state:
+    st.session_state.current_model = PRIMARY_MODEL
+
+if "chat_session" not in st.session_state:
+    st.session_state.chat_session = get_chat_session(st.session_state.current_model)
 
 if "show_camera" not in st.session_state:
     st.session_state.show_camera = False
@@ -476,36 +507,78 @@ if user_input:
     
     st.session_state.messages.append({"role": "user", "content": ui_content})
     
-    # 2. Send message (text + image) to Gemini and get response
+    # 2. Send message (text + image) with multi-stage fallback
     with st.chat_message("assistant"):
-        with st.spinner("Analyzing meal..."):
-            response = st.session_state.chat_session.send_message(message_content)
+        with st.spinner("Thinking..."):
+            max_retries = 3
+            retry_delay = 2 # initial delay in seconds
+            success = False
+            response = None
             
-            # Remove JSON block from the displayed text so the user doesn't see it
-            display_text = re.sub(r'```json\n.*?\n```', '', response.text, flags=re.DOTALL).strip()
-            st.markdown(display_text)
-            
-            # Parse JSON block if present to log to sheet
-            logged_something = False
-            match = re.search(r'```json\n(.*?)\n```', response.text, re.DOTALL)
-            if match:
+            # Stage 1: Try Primary Model with Retry
+            for attempt in range(max_retries):
                 try:
-                    items_to_log = json.loads(match.group(1))
-                    for data in items_to_log:
-                        success = log_to_sheet(data.get("item", "Unknown"), data.get("calories", 0), data.get("protein", 0), data.get("density", "0%"))
-                        if success:
-                            st.toast(f"Logged to sheet: {data.get('item')}")
-                            logged_something = True
+                    response = st.session_state.chat_session.send_message(message_content)
+                    success = True
+                    break
                 except Exception as e:
-                    st.error(f"Failed to parse or log items: {e}")
+                    error_msg = str(e).upper()
+                    if "503" in error_msg or "UNAVAILABLE" in error_msg:
+                        if attempt < max_retries - 1:
+                            time.sleep(retry_delay)
+                            retry_delay *= 2 # exponential backoff
+                            continue
+                        else:
+                            # If primary keeps failing 503, fallback to Flash
+                            st.warning("Thinking model is busy. Falling back to Flash for this request...")
+                            st.session_state.current_model = FALLBACK_MODEL
+                            st.session_state.chat_session = get_chat_session(FALLBACK_MODEL)
+                            break
+                    elif "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                        # Permanent-ish error, fallback immediately
+                        st.warning("Quota reached for Thinking model. Falling back to Flash...")
+                        st.session_state.current_model = FALLBACK_MODEL
+                        st.session_state.chat_session = get_chat_session(FALLBACK_MODEL)
+                        break
+                    else:
+                        st.error(f"An unexpected error occurred: {e}")
+                        break
             
-            # Save assistant response to UI history BEFORE rerunning
-            st.session_state.messages.append({"role": "assistant", "content": display_text})
+            # Stage 2: Fallback if needed
+            if not success and st.session_state.current_model == FALLBACK_MODEL:
+                try:
+                    response = st.session_state.chat_session.send_message(message_content)
+                    success = True
+                except Exception as e:
+                    st.error(f"Even fallback model failed: {e}")
             
-            if logged_something:
-                get_trailing_7_days_data.clear()
-            
-            # Reset camera and pending image after successful submission
-            st.session_state.pending_image = None
-            st.session_state.show_camera = False
-            st.rerun()
+            # Step 3: Handle successful response
+            if success and response:
+                # Remove JSON block from the displayed text so the user doesn't see it
+                display_text = re.sub(r'```json\n.*?\n```', '', response.text, flags=re.DOTALL).strip()
+                st.markdown(display_text)
+                
+                # Parse JSON block if present to log to sheet
+                logged_something = False
+                match = re.search(r'```json\n(.*?)\n```', response.text, re.DOTALL)
+                if match:
+                    try:
+                        items_to_log = json.loads(match.group(1))
+                        for data in items_to_log:
+                            success_log = log_to_sheet(data.get("item", "Unknown"), data.get("calories", 0), data.get("protein", 0), data.get("density", "0%"))
+                            if success_log:
+                                st.toast(f"Logged to sheet: {data.get('item')}")
+                                logged_something = True
+                    except Exception as e:
+                        st.error(f"Failed to parse or log items: {e}")
+                
+                # Save assistant response to UI history BEFORE rerunning
+                st.session_state.messages.append({"role": "assistant", "content": display_text})
+                
+                if logged_something:
+                    get_trailing_7_days_data.clear()
+                
+                # Reset camera and pending image after successful submission
+                st.session_state.pending_image = None
+                st.session_state.show_camera = False
+                st.rerun()
