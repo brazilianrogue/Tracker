@@ -29,6 +29,9 @@ if "show_camera" not in st.session_state:
 if "pending_image" not in st.session_state:
     st.session_state.pending_image = None
 
+if "view_selection" not in st.session_state:
+    st.session_state.view_selection = "🍽️ Log"
+
 # --- Function Definitions ---
 @st.cache_resource
 def get_chat_session(model_id, history=None):
@@ -65,8 +68,12 @@ st.markdown("""
         font-weight: 600;
     }
     header[data-testid="stHeader"] {
-        background: rgba(255, 255, 255, 0.8);
-        backdrop-filter: blur(10px);
+        background: #1E1E1E !important;
+        color: #00A6FF !important;
+        border-bottom: 1px solid #00A6FF;
+    }
+    header[data-testid="stHeader"] * {
+        color: #00A6FF !important;
     }
     /* Custom Dashboard CSS */
     .metric-container {
@@ -112,10 +119,6 @@ st.markdown("""
     .stButton button {
         border-radius: 20px;
         font-weight: 600;
-    }
-    header[data-testid="stHeader"] {
-        background: rgba(255, 255, 255, 0.8);
-        backdrop-filter: blur(10px);
     }
     .block-container {
         padding-top: 5rem !important;
@@ -470,6 +473,13 @@ with st.sidebar:
     - Density: >= 10.0%
     """)
     st.divider()
+    st.subheader("🧭 Navigation")
+    st.session_state.view_selection = st.radio(
+        "Select View",
+        ["🍽️ Log", "📊 Analytics"],
+        label_visibility="collapsed"
+    )
+    st.divider()
     st.subheader("📷 Meal Capture")
     if st.button("📷 Open Camera", use_container_width=True):
         st.session_state.show_camera = not st.session_state.show_camera
@@ -494,278 +504,208 @@ with st.sidebar:
             st.success("History wiped!")
             st.rerun()
 
-# --- 4. Modernized Header & Dashboard ---
-# --- 4. Modernized Dashboard ---
-# Fasting Status & Weight row
-status, target_timestamp = get_fasting_status(fasting_schedule)
-lowest_w = get_lowest_weight()
+# --- 4. Main View Logic ---
+if st.session_state.view_selection == "🍽️ Log":
+    # --- 4. Modernized Dashboard (Log View) ---
+    # Fasting Status & Weight row
+    status, target_timestamp = get_fasting_status(fasting_schedule)
+    lowest_w = get_lowest_weight()
 
-dashboard_html = f"""
-<div class="metric-container">
-    <div class="metric-card" style="border: 1px solid #00A6FF;">
-        <div class="metric-label">Status</div>
-        <div class="metric-value" style="font-size: 1rem; color: #00A6FF;">{status}</div>
-        <div id="countdown-timer" style="font-size: 1.1rem; font-weight: 700; color: white;">--:--:--</div>
+    dashboard_html = f"""
+    <div class="metric-container">
+        <div class="metric-card" style="border: 1px solid #00A6FF;">
+            <div class="metric-label">Status</div>
+            <div class="metric-value" style="font-size: 1rem; color: #00A6FF;">{status}</div>
+            <div id="countdown-timer" style="font-size: 1.1rem; font-weight: 700; color: white;">--:--:--</div>
+        </div>
+        <div class="metric-card" style="border: 1px solid #00A6FF;">
+            <div class="metric-label">Record Low</div>
+            <div class="metric-value" style="font-size: 1.5rem;">{f"{lowest_w:.1f}" if lowest_w else "--"}</div>
+            <div class="metric-delta delta-green">lbs</div>
+        </div>
     </div>
-    <div class="metric-card" style="border: 1px solid #00A6FF;">
-        <div class="metric-label">Record Low</div>
-        <div class="metric-value" style="font-size: 1.5rem;">{f"{lowest_w:.1f}" if lowest_w else "--"}</div>
-        <div class="metric-delta delta-green">lbs</div>
-    </div>
-</div>
-"""
-st.markdown(dashboard_html, unsafe_allow_html=True)
+    """
+    st.markdown(dashboard_html, unsafe_allow_html=True)
 
-# Inject JS for timer separately
-if target_timestamp:
-    st.components.v1.html(f"""
-    <script>
-    (function() {{
-        const targetTime = {target_timestamp};
-        const timerElement = window.parent.document.getElementById('countdown-timer') || document.getElementById('countdown-timer');
-        
-        function updateTimer() {{
-            const now = new Date().getTime();
-            const difference = targetTime - now;
+    # Inject JS for timer separately
+    if target_timestamp:
+        st.components.v1.html(f"""
+        <script>
+        (function() {{
+            const targetTime = {target_timestamp};
+            const timerElement = window.parent.document.getElementById('countdown-timer') || document.getElementById('countdown-timer');
             
-            if (difference <= 0) {{
-                if(timerElement) timerElement.innerHTML = "00:00:00";
-                return;
+            function updateTimer() {{
+                const now = new Date().getTime();
+                const difference = targetTime - now;
+                
+                if (difference <= 0) {{
+                    if(timerElement) timerElement.innerHTML = "00:00:00";
+                    return;
+                }}
+                
+                const hours = Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((difference % (1000 * 60)) / 1000);
+                
+                if(timerElement) {{
+                    timerElement.innerHTML = 
+                        String(hours).padStart(2, '0') + ":" + 
+                        String(minutes).padStart(2, '0') + ":" + 
+                        String(seconds).padStart(2, '0');
+                }}
             }}
             
-            const hours = Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-            const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
-            const seconds = Math.floor((difference % (1000 * 60)) / 1000);
-            
-            if(timerElement) {{
-                timerElement.innerHTML = 
-                    String(hours).padStart(2, '0') + ":" + 
-                    String(minutes).padStart(2, '0') + ":" + 
-                    String(seconds).padStart(2, '0');
-            }}
-        }}
-        
-        updateTimer();
-        setInterval(updateTimer, 1000);
-    }})();
-    </script>
-    """, height=0)
+            updateTimer();
+            setInterval(updateTimer, 1000);
+        }})();
+        </script>
+        """, height=0)
 
-df_7days = get_trailing_7_days_data()
+    df_7days = get_trailing_7_days_data()
 
-# Calculate today's metrics
-today_str = datetime.now(EASTERN) .strftime("%Y-%m-%d")
-if not df_7days.empty and 'Date' in df_7days.columns:
-    today_data = df_7days[df_7days['Date'] == today_str]
-    if not today_data.empty:
-        cals = int(today_data.iloc[0].get('Calories', 0))
-        protein = int(today_data.iloc[0].get('Protein', 0))
-        density = today_data.iloc[0].get('Density', '0.0%')
+    # Calculate today's metrics
+    today_str = datetime.now(EASTERN) .strftime("%Y-%m-%d")
+    if not df_7days.empty and 'Date' in df_7days.columns:
+        today_data = df_7days[df_7days['Date'] == today_str]
+        if not today_data.empty:
+            cals = int(today_data.iloc[0].get('Calories', 0))
+            protein = int(today_data.iloc[0].get('Protein', 0))
+            density = today_data.iloc[0].get('Density', '0.0%')
+        else:
+            cals, protein, density = 0, 0, "0.0%"
     else:
         cals, protein, density = 0, 0, "0.0%"
+
+    # Metric Row (Daily Targets)
+    metric_html = f"""
+    <div class="metric-container">
+        <div class="metric-card">
+            <div class="metric-label">Calories</div>
+            <div class="metric-value">{cals}</div>
+            <div class="metric-delta {'delta-green' if cals <= 1500 else 'delta-red'}">
+                {f'↑ {1500 - cals} left' if cals <= 1500 else f'↓ {cals - 1500} over'}
+            </div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Protein</div>
+            <div class="metric-value">{protein}g</div>
+            <div class="metric-delta {'delta-green' if protein >= 150 else 'delta-red'}">
+                {f'↑ {protein - 150}g' if protein >= 150 else f'↓ {150 - protein}g left'}
+            </div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Density</div>
+            <div class="metric-value">{density}</div>
+            <div class="metric-delta delta-green">Target: 10%</div>
+        </div>
+    </div>
+    """
+    st.markdown(metric_html, unsafe_allow_html=True)
+    st.divider()
+
+    # --- 5. Initialize Chat History & Session State (Log View Only) ---
+    if "messages" not in st.session_state or not st.session_state.messages:
+        with st.spinner("Syncing history from cloud..."):
+            persistent_history = get_persistent_chat()
+            if persistent_history:
+                st.session_state.messages = persistent_history
+            else:
+                st.session_state.messages = [
+                    {"role": "assistant", "content": "Ready to log. What are we eating?"}
+                ]
+
+    if "chat_session" not in st.session_state:
+        st.session_state.chat_session = get_chat_session(st.session_state.current_model)
+
+    # Display previous chat messages in a fixed-height container (optimized for Pro Max)
+    with st.container(height=450):
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                content = message["content"]
+                if isinstance(content, list):
+                    for item in content:
+                        st.write(item)
+                else:
+                    st.markdown(content)
+
+    # --- 6. Chat Input Support (Log View Only) ---
+    # Status indicator for pending image
+    if st.session_state.pending_image:
+        st.markdown("""
+        <div style="background-color: #1E3A5F; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 5px solid #00A6FF;">
+            📷 <b>Photo Attached:</b> Describing your meal below will submit both the text and the photo.
+        </div>
+        """, unsafe_allow_html=True)
+
+    user_input = st.chat_input("Describe your meal...")
+
+    if user_input:
+        # 1. Prepare segments for UI and Gemini
+        message_content = []
+        ui_content = []
+        
+        # Check for pending image in session state
+        image_to_send = st.session_state.pending_image
+        
+        if image_to_send:
+            message_content.append(genai.types.Part.from_bytes(data=image_to_send, mime_type="image/jpeg"))
+            ui_content.append("📷 *Photo attached*")
+        
+        message_content.append(user_input)
+        ui_content.append(user_input)
+
+        # 2. Add user message to UI state
+        st.session_state.messages.append({"role": "user", "content": ui_content})
+        
+        # Refresh current message display
+        with st.chat_message("user"):
+            for seg in ui_content:
+                st.write(seg)
+        
+        # 3. Get Gemini Response
+        with st.chat_message("assistant"):
+            try:
+                response = st.session_state.chat_session.send_message(message_content)
+                full_text = response.text
+                
+                # Thoughts/Chain-of-thought support (if present)
+                if response.candidates[0].thought:
+                    with st.expander("💭 Thinking Process", expanded=False):
+                        st.markdown(response.candidates[0].thought)
+                
+                # Check for table in response text for cleaner rendering
+                st.markdown(full_text)
+                
+                # 4. Persistence & Cleanup
+                st.session_state.messages.append({"role": "assistant", "content": full_text})
+                
+                # Clear pending image once sent
+                if image_to_send:
+                    st.session_state.pending_image = None
+                
+                # Log to Google Sheets
+                log_to_sheet(full_text)
+                
+                # Trigger rerun to sync dashboard metrics
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Error: {e}")
+
 else:
-    cals, protein, density = 0, 0, "0.0%"
-
-# Metric Row (Daily Targets)
-metric_html = f"""
-<div class="metric-container">
-    <div class="metric-card">
-        <div class="metric-label">Calories</div>
-        <div class="metric-value">{cals}</div>
-        <div class="metric-delta {'delta-green' if cals <= 1500 else 'delta-red'}">
-            {f'↑ {1500 - cals} left' if cals <= 1500 else f'↓ {cals - 1500} over'}
-        </div>
-    </div>
-    <div class="metric-card">
-        <div class="metric-label">Protein</div>
-        <div class="metric-value">{protein}g</div>
-        <div class="metric-delta {'delta-green' if protein >= 150 else 'delta-red'}">
-            {f'↑ {protein - 150}g' if protein >= 150 else f'↓ {150 - protein}g left'}
-        </div>
-    </div>
-    <div class="metric-card">
-        <div class="metric-label">Density</div>
-        <div class="metric-value">{density}</div>
-        <div class="metric-delta delta-green">Target: 10%</div>
-    </div>
-</div>
-"""
-st.markdown(metric_html, unsafe_allow_html=True)
-
-# Collapsible Weekly History
-with st.expander("📊 Weekly History", expanded=False):
+    # --- Analytics View ---
+    st.subheader("📊 Performance Analytics")
+    df_7days = get_trailing_7_days_data()
+    
+    # Weekly History Table
+    st.markdown("#### Trailing 7 Days")
     if not df_7days.empty:
         st.dataframe(df_7days, width="stretch", hide_index=True)
     else:
         st.info("No logs found for the trailing 7 days.")
-
-st.divider()
-
-# --- 5. Initialize Chat History & Session State ---
-if "messages" not in st.session_state or not st.session_state.messages:
-    with st.spinner("Syncing history from cloud..."):
-        persistent_history = get_persistent_chat()
-        if persistent_history:
-            st.session_state.messages = persistent_history
-        else:
-            st.session_state.messages = [
-                {"role": "assistant", "content": "Ready to log. What are we eating?"}
-            ]
-
-if "chat_session" not in st.session_state:
-    st.session_state.chat_session = get_chat_session(st.session_state.current_model)
-
-# Display previous chat messages in a fixed-height container (optimized for Pro Max)
-with st.container(height=450):
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            content = message["content"]
-            if isinstance(content, list):
-                for item in content:
-                    st.write(item)
-            else:
-                st.markdown(content)
-
-# --- 6. Chat Input Support ---
-# Status indicator for pending image
-if st.session_state.pending_image:
-    st.markdown("""
-    <div style="background-color: #1E3A5F; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 5px solid #00A6FF;">
-        📷 <b>Photo Attached:</b> Describing your meal below will submit both the text and the photo.
-    </div>
-    """, unsafe_allow_html=True)
-
-user_input = st.chat_input("Describe your meal...")
-
-if user_input:
-    # 1. Prepare segments for UI and Gemini
-    message_content = []
-    ui_content = []
     
-    # Check for pending image in session state
-    image_to_send = st.session_state.pending_image
-    
-    if image_to_send:
-        message_content.append(genai.types.Part.from_bytes(data=image_to_send, mime_type="image/jpeg"))
-        ui_content.append("📷 *Photo attached*")
-        
-    message_content.append(user_input)
-    ui_content.append(user_input)
-    
-    # Show user message in the UI
-    with st.chat_message("user"):
-        for item in ui_content:
-            st.write(item)
-            if item == "📷 *Photo attached*" and image_to_send:
-                st.image(image_to_send)
-    
-    st.session_state.messages.append({"role": "user", "content": ui_content})
-    
-    # Sync User message to persistent storage
-    log_chat_to_sheet("user", ui_content)
-    
-    # 2. Send message (text + image) with tiered fallback
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            max_retries = 3
-            retry_delay = 2 # initial delay in seconds
-            success = False
-            response = None
-            
-            # Tier 1: Primary Model (Gemini 3 Pro) with Retry
-            for attempt in range(max_retries):
-                try:
-                    # Always ensure we are attempting the primary unless we've already switched
-                    if st.session_state.current_model != PRIMARY_MODEL and not success:
-                         # Preserve history during switch
-                         existing_session = st.session_state.get("chat_session")
-                         existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
-                         st.session_state.current_model = PRIMARY_MODEL
-                         st.session_state.chat_session = get_chat_session(PRIMARY_MODEL, history=existing_history)
+    st.info("💡 More graphs and insights coming soon!")
+    st.divider()
 
-                    response = st.session_state.chat_session.send_message(message_content)
-                    success = True
-                    break
-                except Exception as e:
-                    error_msg = str(e).upper()
-                    if "503" in error_msg or "UNAVAILABLE" in error_msg:
-                        if attempt < max_retries - 1:
-                            time.sleep(retry_delay)
-                            retry_delay *= 2
-                            continue
-                        else:
-                            st.warning("Gemini 3 is currently overloaded. Trying Gemini 2.5 Flash...")
-                            break
-                    elif "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "404" in error_msg:
-                        # Moving to secondary tier immediately
-                        break
-                    else:
-                        st.error(f"Error on Primary: {e}")
-                        break
-            
-            # Tier 2: Secondary Model (Gemini 2.5 Flash)
-            if not success:
-                try:
-                    # Preserve history during switch
-                    existing_session = st.session_state.get("chat_session")
-                    existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
-                    st.session_state.current_model = SECONDARY_MODEL
-                    st.session_state.chat_session = get_chat_session(SECONDARY_MODEL, history=existing_history)
-                    response = st.session_state.chat_session.send_message(message_content)
-                    success = True
-                    st.info("Using Gemini 2.5 Flash Thinking (Primary quota reached).")
-                except Exception as e:
-                    error_msg = str(e).upper()
-                    if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "503" in error_msg or "UNAVAILABLE" in error_msg:
-                        # Move to final tier
-                        pass
-                    else:
-                        st.error(f"Error on Secondary: {e}")
-
-            # Tier 3: Stable Fallback (Gemini 2.0 Flash)
-            if not success:
-                try:
-                    # Preserve history during switch
-                    existing_session = st.session_state.get("chat_session")
-                    existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
-                    st.session_state.current_model = STABLE_MODEL
-                    st.session_state.chat_session = get_chat_session(STABLE_MODEL, history=existing_history)
-                    response = st.session_state.chat_session.send_message(message_content)
-                    success = True
-                    st.warning("High-quality models are currently unavailable. Using stable fallback.")
-                except Exception as e:
-                    st.error(f"Even fallback model failed: {e}")
-            
-            # Step 3: Handle successful response
-            if success and response:
-                # Remove JSON block from the displayed text so the user doesn't see it
-                display_text = re.sub(r'```json\n.*?\n```', '', response.text, flags=re.DOTALL).strip()
-                st.markdown(display_text)
-                
-                # Parse JSON block if present to log to sheet
-                logged_something = False
-                match = re.search(r'```json\n(.*?)\n```', response.text, re.DOTALL)
-                if match:
-                    try:
-                        items_to_log = json.loads(match.group(1))
-                        for data in items_to_log:
-                            success_log = log_to_sheet(data.get("item", "Unknown"), data.get("calories", 0), data.get("protein", 0), data.get("density", "0%"))
-                            if success_log:
-                                st.toast(f"Logged to sheet: {data.get('item')}")
-                                logged_something = True
-                    except Exception as e:
-                        st.error(f"Failed to parse or log items: {e}")
-                
-                # Save assistant response to UI history
-                st.session_state.messages.append({"role": "assistant", "content": display_text})
-                
-                # Sync Assistant response to persistent storage
-                log_chat_to_sheet("assistant", display_text)
-                
-                if logged_something:
-                    get_trailing_7_days_data.clear()
-                
-                # Reset camera and pending image after successful submission
-                st.session_state.pending_image = None
-                st.session_state.show_camera = False
-                st.rerun()
+    # End of view-specific content
