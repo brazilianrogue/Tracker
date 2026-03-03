@@ -242,8 +242,15 @@ def log_to_sheet(item, calories, protein, density):
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         worksheet = sh.sheet1
-        today = datetime.now(EASTERN).strftime("%Y-%m-%d %H:%M:%S")
-        worksheet.append_row([today, item, calories, protein, density])
+        
+        now = datetime.now(EASTERN)
+        today = now.strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Calculate Week Num (ISO Week: Monday to Sunday)
+        year, week, _ = now.isocalendar()
+        week_num = f"{year}-W{week:02d}"
+        
+        worksheet.append_row([today, item, calories, protein, density, week_num])
         return True
     except Exception as e:
         st.error(f"Failed to log to database: {e}")
