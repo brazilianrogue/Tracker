@@ -249,6 +249,77 @@ def log_to_sheet(item, calories, protein, density):
         st.error(f"Failed to log to database: {e}")
         return False
 
+# --- Chat Persistence Helpers ---
+CHAT_HISTORY_WS = "Chat_History"
+
+def get_persistent_chat():
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        try:
+            worksheet = sh.worksheet(CHAT_HISTORY_WS)
+        except gspread.WorksheetNotFound:
+            worksheet = sh.add_worksheet(title=CHAT_HISTORY_WS, rows="1000", cols="3")
+            worksheet.append_row(["Timestamp", "Role", "Parts"])
+            return []
+            
+        data = worksheet.get_all_values()
+        if len(data) <= 1:
+            return []
+            
+        rows = data[1:]
+        history = []
+        for row in rows[-30:]: # Last 30 messages for context
+            if len(row) < 3: continue
+            ts, role, parts_json = row
+            try:
+                parts = json.loads(parts_json)
+                content = [p.get("text", "") for p in parts]
+                history.append({"role": role, "content": content})
+            except:
+                continue
+        return history
+    except Exception as e:
+        return []
+
+def log_chat_to_sheet(role, content):
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        try:
+            worksheet = sh.worksheet(CHAT_HISTORY_WS)
+        except:
+            return
+            
+        if isinstance(content, str):
+            parts = [{"text": content}]
+        else:
+            parts = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append({"text": item})
+                else:
+                    parts.append({"text": "📷 *Photo attached*"})
+                    
+        today = datetime.now(EASTERN).strftime("%Y-%m-%d %H:%M:%S")
+        worksheet.append_row([today, role, json.dumps(parts)])
+    except:
+        pass
+
+def clear_persistent_chat():
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        worksheet = sh.worksheet(CHAT_HISTORY_WS)
+        worksheet.clear()
+        worksheet.append_row(["Timestamp", "Role", "Parts"])
+        return True
+    except:
+        return False
+
 # --- 3. System Prompt (The Rules Engine) ---
 def get_system_prompt(schedule):
     formatted_schedule = "\n".join([f"- {day}: {times['start']} to {times['end']}" if times['start'] else f"- {day}: Fasting / Skip" for day, times in schedule.items()])
@@ -321,6 +392,12 @@ with st.sidebar:
     - Protein: >= 150g
     - Density: >= 10.0%
     """)
+    if st.button("🗑️ Clear Chat History", help="Permanently clear the persistent thread from Google Sheets"):
+        if clear_persistent_chat():
+            st.session_state.messages = [{"role": "assistant", "content": "Thread cleared. Ready to start fresh!"}]
+            st.session_state.chat_session = get_chat_session(st.session_state.current_model)
+            st.success("History wiped!")
+            st.rerun()
 
 # --- 4. Modernized Header & Dashboard ---
 st.markdown("### **Ratio**<span style='color:#00A6FF'>Ten</span>", unsafe_allow_html=True)
@@ -431,9 +508,14 @@ st.divider()
 
 # --- 5. Initialize Chat History & Session State ---
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Ready to log. What are we eating?"}
-    ]
+    with st.spinner("Syncing history from cloud..."):
+        persistent_history = get_persistent_chat()
+        if persistent_history:
+            st.session_state.messages = persistent_history
+        else:
+            st.session_state.messages = [
+                {"role": "assistant", "content": "Ready to log. What are we eating?"}
+            ]
 
 @st.cache_resource
 def get_chat_session(model_id, history=None):
@@ -514,6 +596,9 @@ if user_input:
                 st.image(image_to_send)
     
     st.session_state.messages.append({"role": "user", "content": ui_content})
+    
+    # Sync User message to persistent storage
+    log_chat_to_sheet("user", ui_content)
     
     # 2. Send message (text + image) with tiered fallback
     with st.chat_message("assistant"):
@@ -604,8 +689,11 @@ if user_input:
                     except Exception as e:
                         st.error(f"Failed to parse or log items: {e}")
                 
-                # Save assistant response to UI history BEFORE rerunning
+                # Save assistant response to UI history
                 st.session_state.messages.append({"role": "assistant", "content": display_text})
+                
+                # Sync Assistant response to persistent storage
+                log_chat_to_sheet("assistant", display_text)
                 
                 if logged_something:
                     get_trailing_7_days_data.clear()
