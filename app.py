@@ -436,7 +436,7 @@ if "messages" not in st.session_state:
     ]
 
 @st.cache_resource
-def get_chat_session(model_id):
+def get_chat_session(model_id, history=None):
     # Determine the best thinking configuration for the model
     config_params = {"system_instruction": SYSTEM_PROMPT}
 
@@ -451,7 +451,8 @@ def get_chat_session(model_id):
     config = genai.types.GenerateContentConfig(**config_params)
     return client.chats.create(
         model=model_id,
-        config=config
+        config=config,
+        history=history
     )
 
 if "current_model" not in st.session_state:
@@ -527,8 +528,10 @@ if user_input:
                 try:
                     # Always ensure we are attempting the primary unless we've already switched
                     if st.session_state.current_model != PRIMARY_MODEL and not success:
+                         # Preserve history during switch
+                         existing_history = st.session_state.chat_session.history if "chat_session" in st.session_state else None
                          st.session_state.current_model = PRIMARY_MODEL
-                         st.session_state.chat_session = get_chat_session(PRIMARY_MODEL)
+                         st.session_state.chat_session = get_chat_session(PRIMARY_MODEL, history=existing_history)
 
                     response = st.session_state.chat_session.send_message(message_content)
                     success = True
@@ -553,8 +556,10 @@ if user_input:
             # Tier 2: Secondary Model (Gemini 2.5 Flash)
             if not success:
                 try:
+                    # Preserve history during switch
+                    existing_history = st.session_state.chat_session.history if "chat_session" in st.session_state else None
                     st.session_state.current_model = SECONDARY_MODEL
-                    st.session_state.chat_session = get_chat_session(SECONDARY_MODEL)
+                    st.session_state.chat_session = get_chat_session(SECONDARY_MODEL, history=existing_history)
                     response = st.session_state.chat_session.send_message(message_content)
                     success = True
                     st.info("Using Gemini 2.5 Flash Thinking (Primary quota reached).")
@@ -569,8 +574,10 @@ if user_input:
             # Tier 3: Stable Fallback (Gemini 2.0 Flash)
             if not success:
                 try:
+                    # Preserve history during switch
+                    existing_history = st.session_state.chat_session.history if "chat_session" in st.session_state else None
                     st.session_state.current_model = STABLE_MODEL
-                    st.session_state.chat_session = get_chat_session(STABLE_MODEL)
+                    st.session_state.chat_session = get_chat_session(STABLE_MODEL, history=existing_history)
                     response = st.session_state.chat_session.send_message(message_content)
                     success = True
                     st.warning("High-quality models are currently unavailable. Using stable fallback.")
