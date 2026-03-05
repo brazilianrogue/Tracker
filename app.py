@@ -866,6 +866,9 @@ else:
         plot_df['Date'] = pd.to_datetime(plot_df['Date'])
         plot_df = plot_df.sort_values('Date')
         
+        # Force day-level granularity by converting back to string for the index
+        plot_df['Date_Label'] = plot_df['Date'].dt.strftime('%b %d')
+        
         # Clean Density for plotting (convert "11.5%" to 11.5)
         if 'Density' in plot_df.columns:
             plot_df['Density_Val'] = plot_df['Density'].str.replace('%', '').astype(float)
@@ -883,7 +886,7 @@ else:
         
         if selected_metrics:
             # Create a display-friendly dataframe for the chart
-            chart_data = plot_df.set_index('Date')[selected_metrics]
+            chart_data = plot_df.set_index('Date_Label')[selected_metrics]
             chart_data.columns = [c.replace("_Val", " Density (%)") for c in chart_data.columns]
             
             st.line_chart(chart_data, use_container_width=True)
