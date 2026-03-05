@@ -610,8 +610,179 @@ def get_custom_instructions():
     except:
         return ""
 
+def save_user_goals(calories, protein):
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        try:
+            worksheet = sh.worksheet("User_Goals")
+        except:
+            worksheet = sh.add_worksheet(title="User_Goals", rows="10", cols="2")
+        worksheet.clear()
+        worksheet.append_row(["Metric", "Value"])
+        worksheet.append_row(["Calories", calories])
+        worksheet.append_row(["Protein", protein])
+        get_user_goals.clear()
+        return True
+    except:
+        return False
+
+def save_fasting_schedule(schedule_dict):
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        try:
+            worksheet = sh.worksheet("Fasting_Schedule")
+        except:
+            worksheet = sh.add_worksheet(title="Fasting_Schedule", rows="10", cols="3")
+        worksheet.clear()
+        worksheet.append_row(["DayOfWeek", "WindowStart", "WindowEnd"])
+        for day, times in schedule_dict.items():
+            start_val = times["start"] if times["start"] else "Skip"
+            end_val = times["end"] if times["end"] else "Skip"
+            worksheet.append_row([day, start_val, end_val])
+        get_fasting_schedule.clear()
+        return True
+    except:
+        return False
+
+@st.cache_data(ttl=600)
+def get_user_goals():
+    default_goals = {"calories": 1500, "protein": 150}
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        try:
+            worksheet = sh.worksheet("User_Goals")
+        except gspread.WorksheetNotFound:
+            worksheet = sh.add_worksheet(title="User_Goals", rows="10", cols="2")
+            worksheet.append_row(["Metric", "Value"])
+            worksheet.append_row(["Calories", default_goals["calories"]])
+            worksheet.append_row(["Protein", default_goals["protein"]])
+            return default_goals
+            
+        data = worksheet.get_all_records()
+        if not data: return default_goals
+            
+        goals = {}
+        for row in data:
+            metric = str(row.get("Metric", "")).strip().lower()
+            val = row.get("Value", 0)
+            if metric == "calories":
+                goals["calories"] = int(val)
+            elif metric == "protein":
+                goals["protein"] = int(val)
+        
+        return {**default_goals, **goals}
+    except Exception as e:
+        return default_goals
+
+@st.cache_data(ttl=3600)
+def calculate_plan_effectiveness():
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        
+        # 1. Get User Goals
+        goals = get_user_goals()
+        target_density = 10.0
+        
+        # 2. Get last 14 days of food logs for adherence
+        try:
+            food_ws = sh.sheet1
+            food_values = food_ws.get_all_values()
+            expected_cols = ["Date", "Item", "Calories", "Protein", "Density"]
+            df_food = pd.DataFrame(food_values)
+            if df_food.iloc[0, 0] in ["Date", "date", "Time", "timestamp", "today"]:
+                df_food.columns = df_food.iloc[0]
+                df_food = df_food[1:]
+            else:
+                df_food.columns = expected_cols
+                
+            df_food['Date'] = pd.to_datetime(df_food['Date'], errors='coerce').dt.date
+            df_food['Calories'] = pd.to_numeric(df_food['Calories'], errors='coerce').fillna(0)
+            df_food['Protein'] = pd.to_numeric(df_food['Protein'], errors='coerce').fillna(0)
+            
+            fourteen_days_ago = (datetime.now(EASTERN) - timedelta(days=14)).date()
+            seven_days_ago = (datetime.now(EASTERN) - timedelta(days=7)).date()
+            
+            df_food = df_food[df_food['Date'] >= fourteen_days_ago]
+            if df_food.empty:
+                return None, "Insufficient food log data (need logs from last 14 days)."
+                
+            daily_summary = df_food.groupby('Date')[['Calories', 'Protein']].sum().reset_index()
+            daily_summary['Density'] = (daily_summary['Protein'] / daily_summary['Calories']) * 100
+            
+            # Adherence Check: Count days where density >= 10.0 and calories <= target + 100
+            adherent_days = 0
+            for _, row in daily_summary.iterrows():
+                if row['Density'] >= target_density and row['Calories'] <= goals['calories'] + 100:
+                    adherent_days += 1
+                    
+            total_days_logged = len(daily_summary)
+            if total_days_logged < 7:
+                return None, "Insufficient food log data (need at least 7 days of logs)."
+                
+            adherence_rate = adherent_days / total_days_logged
+            
+        except Exception as e:
+            return None, "Error parsing food logs."
+
+        # 3. Get last 14 days of weight logs
+        try:
+            weight_ws = sh.worksheet("Weight_Logs")
+            weight_records = weight_ws.get_all_records()
+            if not weight_records:
+                return None, "No weight data found."
+                
+            df_weight = pd.DataFrame(weight_records)
+            df_weight['Date'] = pd.to_datetime(df_weight['Date'], errors='coerce').dt.date
+            df_weight['Weight'] = pd.to_numeric(df_weight['Weight (lbs)'], errors='coerce')
+            
+            df_recent = df_weight[df_weight['Date'] >= fourteen_days_ago]
+            if len(df_recent) < 4:
+                return None, "Insufficient weight data (need at least 4 weigh-ins in last 14 days)."
+                
+            # Delta between first 7 days min and last 7 days min
+            first_half = df_recent[df_recent['Date'] < seven_days_ago]
+            second_half = df_recent[df_recent['Date'] >= seven_days_ago]
+            
+            if first_half.empty or second_half.empty:
+               return None, "Insufficient weight distribution (need weigh-ins in both weeks)."
+               
+            w1_min = first_half['Weight'].min()
+            w2_min = second_half['Weight'].min()
+            weight_delta = w1_min - w2_min # Positive means weight loss
+            
+        except Exception as e:
+            return None, "Error parsing weight logs."
+
+        # 4. Calculate Score 
+        # Base score on adherence (0 to 5 pts)
+        score = adherence_rate * 5.0
+        
+        # Add points for weight loss (up to 5 pts)
+        # If weight loss is >= 1.0 lbs, give full 5 pts. If 0 lbs, give 2 points (maintenance). If gained, 0 pts.
+        if weight_delta >= 1.0:
+            score += 5.0
+        elif weight_delta >= 0:
+            score += 2.0 + (weight_delta * 3.0) # Scale between 0 and 1
+        elif weight_delta < -0.5:
+             # subtract points for significant gain
+             score -= 2.0
+             
+        score = max(1.0, min(10.0, score))
+        return score, None
+        
+    except Exception as e:
+        return None, f"Calculation error: {e}"
+
 # --- 3. System Prompt (The Rules Engine) ---
-def get_system_prompt(schedule, custom_instructions="", today_stats=None, weekly_summary=None):
+def get_system_prompt(schedule, goals, custom_instructions="", today_stats=None, weekly_summary=None):
     now = datetime.now(EASTERN)
     current_day = now.strftime("%A")
     current_date = now.strftime("%Y-%m-%d")
@@ -631,11 +802,11 @@ def get_system_prompt(schedule, custom_instructions="", today_stats=None, weekly
     if today_stats:
         stats_context = f"""
 ### CURRENT DAY SITUATION REPORT:
-- **Calories Ingested:** {today_stats['cals']} / 1500 (Lid)
-- **Protein Ingested:** {today_stats['protein']}g / 150g (Floor)
+- **Calories Ingested:** {today_stats['cals']} / {goals['calories']} (Lid)
+- **Protein Ingested:** {today_stats['protein']}g / {goals['protein']}g (Floor)
 - **Current Density:** {today_stats['density']}
-- **Remaining Calorie Room:** {max(0, 1500 - today_stats['cals'])}
-- **Remaining Protein Needed:** {max(0, 150 - today_stats['protein'])}g
+- **Remaining Calorie Room:** {max(0, goals['calories'] - today_stats['cals'])}
+- **Remaining Protein Needed:** {max(0, goals['protein'] - today_stats['protein'])}g
 """
 
     weekly_context = ""
@@ -683,10 +854,11 @@ Formatting Constraints (Mobile Optimized):
   1. Current Day's Items: (Item Name, Cals, Protein, Density)
 
 Daily Targets & Banter (REQUIRED):
-- Goal: <= 1500 Calories, >= 150g Protein, Density Target: >= 10.0%.
+- Goal: <= {goals['calories']} Calories, >= {goals['protein']}g Protein, Density Target: >= 10.0%.
 - Below the data table, you MUST evaluate each logged item and the overall progress for the day against these targets.
 - Use "Shred Language" and maintain the persona in your evaluation.
 - Ending: Always end with a "Verdict" or "Strategy" for the next meal. Always look for the "next play."
+
 
 Daily 6:00 PM Wrap-Up (Creatine Check):
 - Check logs for "protein shake" or "ultra-filtered shake".
@@ -724,80 +896,50 @@ JSON Output for Database Logging:
 
 fasting_schedule = get_fasting_schedule()
 custom_instructions = get_custom_instructions()
-SYSTEM_PROMPT = get_system_prompt(fasting_schedule, custom_instructions)
+user_goals = get_user_goals()
+SYSTEM_PROMPT = get_system_prompt(fasting_schedule, user_goals, custom_instructions)
 
-# --- 4. Sidebar & Profile ---
-with st.sidebar:
+# --- 4. Top Navigation ---
+st.markdown("""
+<style>
+/* Modern styling for the top nav mimicking the Tixx app dashboard */
+div[data-testid="column"] button { border: none !important; background: transparent !important; color: #888899 !important; font-weight: 600; padding: 15px 0px; box-shadow: none !important; transition: all 0.2s ease; border-radius: 8px;}
+div[data-testid="column"] button:hover { color: #FFFFFF !important; background: rgba(255,255,255,0.05) !important; }
+div[data-testid="column"] button:active { background: rgba(255,255,255,0.1) !important; }
+</style>
+""", unsafe_allow_html=True)
+
+nav_cols = st.columns([1.2, 1, 1, 1])
+if "view_selection" not in st.session_state:
+    st.session_state.view_selection = "🍽️ Log"
+
+with nav_cols[0]:
     try:
-        st.image("logo.png", width="stretch")
+        # Smaller modern logo at the left
+        st.image("modern_ratioten_logo.png", width=60)
     except:
-        pass
-    st.header("⚙️ RatioTen Protocol")
-    st.info("""
-    **Standard Protocol:**
-    18:6 Fast (12PM - 6PM)
-    
-    **Special Days:**
-    - Mon: 42hr "Skip Day"
-    - Fri: OMAD @ 6PM
-    
-    **Daily Targets:**
-    - Cals: <= 1500
-    - Protein: >= 150g
-    - Density: >= 10.0%
-    """)
-    st.divider()
-    st.subheader("🧭 Navigation")
-    st.session_state.view_selection = st.radio(
-        "Select View",
-        ["🍽️ Log", "📊 Analytics"],
-        label_visibility="collapsed"
-    )
-    st.divider()
-    st.subheader("📷 Meal Capture")
-    if st.button("📷 Open Camera", use_container_width=True):
-        st.session_state.show_camera = not st.session_state.show_camera
-    
-    if st.session_state.show_camera:
-        captured_file = st.camera_input("Capture your meal")
-        if captured_file:
-            st.session_state.pending_image = captured_file.getvalue()
-            st.success("Photo attached!")
-    
-    if st.session_state.pending_image:
-        st.info("✅ Image ready to send")
-    st.divider()
-    st.subheader("🛠️ Developer Tools")
-    if "enable_demo" not in st.session_state:
-        st.session_state.enable_demo = False
-    st.session_state.enable_demo = st.toggle("Enable Demo Data", value=st.session_state.enable_demo, help="Show sample data for weekly trends.")
-    
-    st.divider()
-    if st.button("🗑️ Clear Chat History", help="Permanently clear the persistent thread from Google Sheets"):
-        if clear_persistent_chat():
-            st.session_state.messages = [{"role": "assistant", "content": "Thread cleared. Ready to start fresh!"}]
-            
-            # Fetch fresh stats for the new session
-            df_init = get_trailing_7_days_data()
-            today_init = datetime.now(EASTERN).strftime("%Y-%m-%d")
-            cals_init, protein_init, density_init = 0, 0, "0.0%"
-            if not df_init.empty and 'Date' in df_init.columns:
-                today_data = df_init[df_init['Date'] == today_init]
-                if not today_data.empty:
-                    cals_init = int(today_data.iloc[0].get('Calories', 0))
-                    protein_init = int(today_data.iloc[0].get('Protein', 0))
-                    density_init = today_data.iloc[0].get('Density', '0.0%')
-            
-            init_stats = {'cals': cals_init, 'protein': protein_init, 'density': density_init}
-            fresh_prompt = get_system_prompt(fasting_schedule, custom_instructions, today_stats=init_stats, weekly_summary=df_init)
-            
-            st.session_state.chat_session = get_chat_session(st.session_state.current_model, fresh_prompt)
-            st.success("History wiped!")
-            st.rerun()
+        st.markdown("<h3 style='margin:0; padding:0;'>RatioTen</h3>", unsafe_allow_html=True)
 
-# --- 4. Main View Logic ---
+with nav_cols[1]:
+    if st.button("🏠 Home", use_container_width=True): 
+        st.session_state.view_selection = "🍽️ Log"
+with nav_cols[2]:
+    if st.button("📊 Stats", use_container_width=True): 
+        st.session_state.view_selection = "📊 Analyze"
+with nav_cols[3]:
+    if st.button("⚙️ Plan", use_container_width=True): 
+        st.session_state.view_selection = "⚙️ Plan"
+
+st.divider()
+
+# --- 4.5 Modals & Tools ---
+if "enable_demo" not in st.session_state:
+    st.session_state.enable_demo = False
+
+# --- Main View Logic ---
 if st.session_state.view_selection == "🍽️ Log":
-    # --- 4. Modernized Dashboard (Log View) ---
+    # --- Modernized Dashboard (Log View) ---
+
     # Fasting Status & Weight row
     status, target_timestamp = get_fasting_status(fasting_schedule)
     lowest_w = get_lowest_weight()
@@ -874,15 +1016,15 @@ if st.session_state.view_selection == "🍽️ Log":
         <div class="metric-card">
             <div class="metric-label">Calories</div>
             <div class="metric-value">{cals}</div>
-            <div class="metric-delta {'delta-green' if cals <= 1500 else 'delta-red'}">
-                {f'↑ {1500 - cals} left' if cals <= 1500 else f'↓ {cals - 1500} over'}
+            <div class="metric-delta {'delta-green' if cals <= user_goals['calories'] else 'delta-red'}">
+                {f'↑ {user_goals["calories"] - cals} left' if cals <= user_goals['calories'] else f'↓ {cals - user_goals["calories"]} over'}
             </div>
         </div>
         <div class="metric-card">
             <div class="metric-label">Protein</div>
             <div class="metric-value">{protein}g</div>
-            <div class="metric-delta {'delta-green' if protein >= 150 else 'delta-red'}">
-                {f'↑ {protein - 150}g' if protein >= 150 else f'↓ {150 - protein}g left'}
+            <div class="metric-delta {'delta-green' if protein >= user_goals['protein'] else 'delta-red'}">
+                {f'↑ {protein - user_goals["protein"]}g' if protein >= user_goals['protein'] else f'↓ {user_goals["protein"] - protein}g left'}
             </div>
         </div>
         <div class="metric-card">
@@ -930,7 +1072,7 @@ if st.session_state.view_selection == "🍽️ Log":
 
     if "chat_session" not in st.session_state:
         current_stats = {'cals': cals, 'protein': protein, 'density': density}
-        fresh_prompt = get_system_prompt(fasting_schedule, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
+        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
         st.session_state.chat_session = get_chat_session(st.session_state.current_model, fresh_prompt)
 
     # Display previous chat messages in a fixed-height container (optimized for Pro Max)
@@ -945,13 +1087,29 @@ if st.session_state.view_selection == "🍽️ Log":
                     st.markdown(content)
 
     # --- 6. Chat Input Support (Log View Only) ---
-    # Status indicator for pending image
-    if st.session_state.pending_image:
-        st.markdown("""
-        <div style="background-color: #1E3A5F; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 5px solid #00A6FF;">
-            📷 <b>Photo Attached:</b> Describing your meal below will submit both the text and the photo.
-        </div>
-        """, unsafe_allow_html=True)
+    # Moved the camera logic directly above the chat input
+    with st.container():
+        # Status indicator for pending image
+        if st.session_state.pending_image:
+            st.markdown("""
+            <div style="background-color: #1E3A5F; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 5px solid #00A6FF;">
+                📷 <b>Photo Attached:</b> Describing your meal below will submit both the text and the photo.
+            </div>
+            """, unsafe_allow_html=True)
+            
+        if st.session_state.show_camera:
+            captured_file = st.camera_input("Capture your meal", label_visibility="collapsed")
+            if captured_file:
+                st.session_state.pending_image = captured_file.getvalue()
+                st.success("Photo attached!")
+                st.session_state.show_camera = False # Hide camera after capture
+                st.rerun()
+                
+        # Camera button is directly above the chat input, without large headers
+        if not st.session_state.show_camera and not st.session_state.pending_image:
+            if st.button("📷 Open Camera", use_container_width=True):
+                st.session_state.show_camera = True
+                st.rerun()
 
     user_input = st.chat_input("Describe your meal...")
 
@@ -993,7 +1151,7 @@ if st.session_state.view_selection == "🍽️ Log":
                     try:
                         # Refresh session with latest stats for proactive auditing
                         current_stats = {'cals': cals, 'protein': protein, 'density': density}
-                        fresh_prompt = get_system_prompt(fasting_schedule, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
+                        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
                         
                         existing_session = st.session_state.get("chat_session")
                         existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
@@ -1029,7 +1187,7 @@ if st.session_state.view_selection == "🍽️ Log":
                         st.session_state.current_model = SECONDARY_MODEL
                         
                         current_stats = {'cals': cals, 'protein': protein, 'density': density}
-                        fresh_prompt = get_system_prompt(fasting_schedule, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
+                        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
                         
                         st.session_state.chat_session = get_chat_session(SECONDARY_MODEL, fresh_prompt, history=existing_history)
                         response = st.session_state.chat_session.send_message(message_content)
@@ -1092,7 +1250,7 @@ if st.session_state.view_selection == "🍽️ Log":
                     st.session_state.show_camera = False
                     st.rerun()
 
-else:
+elif st.session_state.view_selection == "📊 Analyze":
     # --- Analytics View ---
     st.subheader("📊 Performance Analytics")
     df_7days = get_trailing_7_days_data()
@@ -1213,5 +1371,88 @@ else:
                     st.divider()
 
     st.info("💡 Strategic tip: Use the '🍽️ Log' view to add data for today!")
+
+elif st.session_state.view_selection == "⚙️ Plan":
+    st.subheader("⚙️ RatioTen Protocol Plan")
+    
+    # 1. Effectiveness Score
+    score, msg = calculate_plan_effectiveness()
+    if score is not None:
+        # Render a custom Speedometer gauge
+        color = "#00A6FF" # Cyan by default
+        if score < 5: color = "#dc3545"
+        elif score < 8: color = "#ffc107"
+        
+        rotation = (score / 10.0) * 180 - 90 # -90 to 90 degrees
+        
+        gauge_html = f"""
+        <div style="text-align: center; margin: 30px 0;">
+            <div style="font-size: 0.9rem; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;">Plan Effectiveness Score</div>
+            <div style="position: relative; width: 250px; height: 125px; margin: 0 auto; overflow: hidden;">
+                <div style="position: absolute; top: 0; left: 0; width: 250px; height: 250px; border-radius: 50%; border: 15px solid #333; border-bottom-color: transparent; border-left-color: transparent; transform: rotate(135deg);"></div>
+                <div style="position: absolute; top: 0; left: 0; width: 250px; height: 250px; border-radius: 50%; border: 15px solid {color}; border-bottom-color: transparent; border-left-color: transparent; transform: rotate({rotation+45}deg); transition: transform 1s ease-out; box-shadow: 0 0 15px {color} inset;"></div>
+                <div style="position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); font-size: 3rem; font-weight: 800; color: white;">{score:.1f}</div>
+            </div>
+            <div style="font-size: 0.8rem; color: #aaa; margin-top: 5px;">Based on 14-day adherence & record low weight</div>
+        </div>
+        """
+        st.markdown(gauge_html, unsafe_allow_html=True)
+    else:
+        st.info(f"📊 Effectiveness Calibrating: {msg}")
+
+    st.divider()
+
+    # 2. Goal Editor
+    st.markdown("#### 🎯 Daily Targets")
+    with st.form("goals_form"):
+        col_c, col_p = st.columns(2)
+        with col_c:
+            new_cals = st.number_input("Calorie Lid", min_value=1000, max_value=4000, value=user_goals.get("calories", 1500), step=50)
+        with col_p:
+            new_prot = st.number_input("Protein Floor (g)", min_value=50, max_value=300, value=user_goals.get("protein", 150), step=5)
+            
+        calculated_density = (new_prot / new_cals) * 100 if new_cals > 0 else 0
+        st.caption(f"Calculated Target Density: **{calculated_density:.1f}%**")
+        
+        if st.form_submit_button("Save Goals", type="primary"):
+            if save_user_goals(new_cals, new_prot):
+                st.success("Goals updated successfully!")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("Failed to save goals.")
+
+    st.divider()
+
+    # 3. Schedule Editor
+    st.markdown("#### ⏳ Fasting Schedule")
+    with st.form("schedule_form"):
+        days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        new_schedule = {}
+        for day in days:
+            current = fasting_schedule.get(day, {"start": None, "end": None})
+            col1, col2, col3 = st.columns([2, 2, 2])
+            with col1:
+                st.markdown(f"**{day}**")
+                skip_day = st.checkbox("Fast / Skip", value=(current["start"] is None), key=f"skip_{day}")
+            with col2:
+                s_val = current["start"] if current["start"] else "12:00"
+                s_time = st.time_input("Start", value=datetime.strptime(s_val, "%H:%M").time(), key=f"start_{day}", disabled=skip_day)
+            with col3:
+                e_val = current["end"] if current["end"] else "18:00"
+                e_time = st.time_input("End", value=datetime.strptime(e_val, "%H:%M").time(), key=f"end_{day}", disabled=skip_day)
+                
+            if skip_day:
+                new_schedule[day] = {"start": None, "end": None}
+            else:
+                new_schedule[day] = {"start": s_time.strftime("%H:%M"), "end": e_time.strftime("%H:%M")}
+                
+        if st.form_submit_button("Save Schedule", type="primary"):
+            if save_fasting_schedule(new_schedule):
+                st.success("Schedule updated successfully!")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("Failed to save schedule.")
 
     # End of view-specific content
