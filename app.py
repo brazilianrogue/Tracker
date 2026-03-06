@@ -159,68 +159,86 @@ st.markdown("""
     /* Timeline styles */
     .timeline-wrapper {
         width: 100%;
-        padding: 45px 0 10px 0; /* Increased top padding for staggering */
-        margin-bottom: 25px;
+        padding: 60px 0 60px 0; /* Balanced padding for bimodal tracks */
+        margin-bottom: 20px;
         position: relative;
     }
     .timeline-bar {
-        height: 6px;
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 3px;
+        height: 18px; /* Thicker bar to house labels */
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 9px;
         position: relative;
         width: 100%;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0 10px;
+        box-sizing: border-box;
+        border: 1px solid rgba(255, 255, 255, 0.05);
     }
     .timeline-progress {
         position: absolute;
+        top: 0;
+        left: 0;
         height: 100%;
-        background: linear-gradient(90deg, #00A6FF, #00FFCC);
-        border-radius: 3px;
-        box-shadow: 0 0 10px rgba(0, 166, 255, 0.5);
+        background: linear-gradient(90deg, rgba(0, 166, 255, 0.3), rgba(0, 255, 204, 0.3));
+        border-radius: 9px;
+        z-index: 1;
     }
     .timeline-marker {
         position: absolute;
         top: 50%;
         transform: translate(-50%, -50%);
-        width: 14px;
-        height: 14px;
-        background: white;
-        border: 2px solid #00A6FF;
-        border-radius: 50%;
-        box-shadow: 0 0 8px #00A6FF;
+        width: 12px;
+        height: 24px;
+        background: #00A6FF;
+        border-radius: 2px;
+        box-shadow: 0 0 10px rgba(0, 166, 255, 0.6);
         z-index: 10;
+        border: 1px solid white;
     }
     .timeline-emoji {
         position: absolute;
-        transform: translate(-50%, -100%); /* Position above the bar */
-        font-size: 1.3rem;
+        font-size: 0.95rem; /* ~25% smaller */
         cursor: help;
-        transition: all 0.2s;
+        transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         z-index: 5;
         display: flex;
         flex-direction: column;
         align-items: center;
+        white-space: nowrap;
     }
-    .timeline-emoji::after {
-        content: '';
+    .timeline-emoji-cluster-badge {
+        position: absolute;
+        top: -6px;
+        right: -8px;
+        background: #fca311;
+        color: #161821;
+        font-size: 0.6rem;
+        padding: 1px 4px;
+        border-radius: 6px;
+        font-weight: 800;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    .timeline-stem {
         width: 1px;
-        height: 8px; /* Connecting stem */
         background: rgba(255, 255, 255, 0.2);
-        margin-top: 2px;
+        transition: all 0.2s;
     }
     .timeline-emoji:hover {
-        transform: translate(-50%, -100%) scale(1.4);
-        z-index: 20;
+        transform: scale(1.4) !important;
+        z-index: 30;
     }
-    .timeline-emoji:hover::after {
+    .timeline-emoji:hover .timeline-stem {
         background: #00A6FF;
+        width: 2px;
     }
-    .timeline-labels {
-        display: flex;
-        justify-content: space-between;
-        font-size: 0.7rem;
-        color: #888;
-        margin-top: 8px;
+    .timeline-bar-label {
+        font-size: 0.65rem;
+        color: rgba(255, 255, 255, 0.4);
         font-family: monospace;
+        z-index: 2;
+        pointer-events: none;
     }
     
     /* Section Header Styles */
@@ -334,7 +352,7 @@ client = get_client()
 
 def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, title=None):
     """
-    Renders a compact, robust HTML timeline with vertical staggering.
+    Renders a bimodal, clustered timeline with reduced emoji sizes.
     """
     try:
         ref_date = datetime.now(EASTERN).date()
@@ -342,17 +360,15 @@ def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, 
         end_dt = datetime.combine(ref_date, datetime.strptime(end_time_str, "%H:%M").time()).replace(tzinfo=EASTERN)
         total_duration = (end_dt - start_dt).total_seconds()
 
-        # Sort logs by timestamp for staggered logic
+        # 1. Smart Clustering (15-minute window)
         sorted_logs = sorted(logs, key=lambda x: x["timestamp"])
-
-        emoji_markers = ""
-        lanes = [] # Tracks the rightmost position used in each lane
-
+        clusters = [] # List of { "pos": float, "emojis": [], "items": [] }
+        
         for log in sorted_logs:
             log_ts = log["timestamp"].replace(tzinfo=EASTERN)
             log_norm = datetime.combine(ref_date, log_ts.time()).replace(tzinfo=EASTERN)
             
-            # Boundary logic: include items within 1 hour before start or 1 hour after end
+            # Boundary logic
             one_hour = timedelta(hours=1)
             is_valid = False
             pos = 0.0
@@ -362,49 +378,101 @@ def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, 
                 pos = ((log_norm - start_dt).total_seconds() / total_duration) * 100
             elif (start_dt - one_hour) <= log_norm < start_dt:
                 is_valid = True
-                pos = 0.0 # Snap to start
+                pos = 0.0
             elif end_dt < log_norm <= (end_dt + one_hour):
                 is_valid = True
-                pos = 100.0 # Snap to end
+                pos = 100.0
                 
             if is_valid:
                 pos = max(0.0, min(100.0, pos))
-                emoji = log["emoji"].strip() if log["emoji"] else "🍽️"
-                
-                # Determine vertical lane (staggering)
-                lane_index = 0
-                threshold = 8.0 # % width threshold for overlap
-                
-                for i, right_edge in enumerate(lanes):
-                    if pos > right_edge + threshold:
-                        lane_index = i
-                        lanes[i] = pos
-                        break
+                # Check if it fits in recent cluster
+                if clusters and abs(pos - clusters[-1]["pos"]) < 3.0: # ~10-15 min window depending on total dur
+                    clusters[-1]["emojis"].append(log["emoji"])
+                    clusters[-1]["items"].append(log["item"])
                 else:
-                    lane_index = len(lanes)
-                    lanes.append(pos)
-                
-                # Dynamic top position based on lane (starting from -5px up to -45px)
-                top_offset = -5 - (lane_index * 20)
-                
-                # Edge alignment: ensure emojis at the ends don't get cut off
-                align_style = f"left: {pos:.1f}%; top: {top_offset}px;"
-                if pos < 5:
-                    align_style += " transform: translate(0, -100%);"
-                elif pos > 95:
-                    align_style += " transform: translate(-100%, -100%);"
+                    clusters.append({
+                        "pos": pos, 
+                        "emojis": [log["emoji"]], 
+                        "items": [log["item"]]
+                    })
 
-                emoji_markers += f'<div class="timeline-emoji" style="{align_style}" title="{log["item"]}">{emoji}</div>'
+        # 2. Bimodal & Lane Rendering
+        emoji_markers = ""
+        lanes_top = []
+        lanes_bottom = []
+        
+        for i, cluster in enumerate(clusters):
+            pos = cluster["pos"]
+            primary_emoji = cluster["emojis"][0]
+            count = len(cluster["emojis"])
+            display_title = " / ".join(cluster["items"])
+            
+            # Alternate top/bottom
+            side = "top" if i % 2 == 0 else "bottom"
+            lanes = lanes_top if side == "top" else lanes_bottom
+            
+            # Lane staggering within the side
+            lane_idx = 0
+            threshold = 10.0 # Cluster width threshold
+            for l_i, right_edge in enumerate(lanes):
+                if pos > right_edge + threshold:
+                    lane_idx = l_i
+                    lanes[l_i] = pos
+                    break
+            else:
+                lane_idx = len(lanes)
+                lanes.append(pos)
+                
+            # Positioning
+            badge_html = f'<div class="timeline-emoji-cluster-badge">+{count-1}</div>' if count > 1 else ""
+            
+            # Vertical math
+            # lane 0: 15px from bar, lane 1: 40px from bar
+            offset_val = 15 + (lane_idx * 25)
+            
+            if side == "top":
+                stem_html = f'<div class="timeline-stem" style="height: {offset_val}px; margin-top: 2px;"></div>'
+                transform = "translate(-50%, -100%)"
+                top_style = f"bottom: 100%; margin-bottom: 0px;"
+                content = f"<div>{primary_emoji}{badge_html}</div>{stem_html}"
+            else:
+                stem_html = f'<div class="timeline-stem" style="height: {offset_val}px; margin-bottom: 2px;"></div>'
+                transform = "translate(-50%, 0)"
+                top_style = f"top: 100%; margin-top: 0px;"
+                content = f"{stem_html}<div>{primary_emoji}{badge_html}</div>"
+
+            # Edge adjustments
+            left_style = f"{pos:.1f}%"
+            final_transform = transform
+            if pos < 5:
+                left_style = "0%"
+                final_transform = transform.replace("-50%", "0")
+            elif pos > 95:
+                left_style = "100%"
+                final_transform = transform.replace("-50%", "-100%")
+
+            group_style = f"left: {left_style}; {top_style} transform: {final_transform};"
+            emoji_markers += f'<div class="timeline-emoji" style="{group_style}" title="{display_title}">{content}</div>'
         
         marker_html = ""
         if progress_pct is not None:
             marker_html = f'<div class="timeline-progress" style="width: {progress_pct:.1f}%;"></div><div class="timeline-marker" style="left: {progress_pct:.1f}%;"></div>'
 
-        header_html = f'<div style="font-size: 0.85rem; color: #00A6FF; margin-bottom: 2px; font-weight: 700;">{title}</div>' if title else ""
+        header_html = f'<div style="font-size: 0.85rem; color: #00A6FF; margin-bottom: 8px; font-weight: 700;">{title}</div>' if title else ""
 
-        return f'<div style="margin-top: 10px; margin-bottom: 20px;">{header_html}<div class="timeline-wrapper"><div class="timeline-bar">{marker_html}{emoji_markers}</div><div class="timeline-labels"><span>{start_time_str}</span><span>{end_time_str}</span></div></div></div>'
+        bar_html = f"""
+        <div class="timeline-bar">
+            <div class="timeline-bar-label">{start_time_str}</div>
+            <div class="timeline-bar-label">{end_time_str}</div>
+            {marker_html}
+            {emoji_markers}
+        </div>
+        """
+
+        return f'<div style="margin-top: 20px; margin-bottom: 20px;">{header_html}<div class="timeline-wrapper">{bar_html}</div></div>'
     except Exception as e:
-        return f"<!-- Timeline Error: {e} -->"
+        import traceback
+        return f"<!-- Timeline Error: {e} \n {traceback.format_exc()} -->"
 
 # --- Database Setup ---
 @st.cache_data(ttl=600)
