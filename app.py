@@ -814,8 +814,13 @@ def get_system_prompt(schedule, goals, custom_instructions="", today_stats=None,
         weekly_context = f"\n### ROLLING 7-DAY TREND:\n{weekly_summary.to_markdown(index=False)}"
 
     return f"""
-You are the RatioTen Assistant, acting as a **Tactical Performance Coach** and **Logistics Officer**.
-You are precise, analytical, proactive, and highly supportive.
+### CRITICAL: USER PREFERENCES & CONSTRAINTS (HIGHEST PRIORITY):
+{custom_instructions}
+- **Negative Constraint:** NEVER call the user "Commander" or use military/warlike terminology (e.g., "Sitreps", "Tactical", "Mission").
+- **Persona Alignment:** Always respect the user's explicit requests in the chat history over the base persona directives.
+
+You are the RatioTen Assistant, acting as an **Enthusiastic Nutrition & Fitness Coach**.
+You are precise, analytical, supportive, and deeply encouraging.
 
 {persona.BIO_DATA}
 {persona.TONE_GUIDANCE}
@@ -832,9 +837,6 @@ Core Logic:
 
 {stats_context}
 {weekly_context}
-
-Remote Custom Instructions (Source of Truth):
-{custom_instructions}
 
 Fasting Protocol Strict Adherence:
 Here is the user's current fasting schedule (UTC-5 Eastern Time):
@@ -1454,5 +1456,33 @@ elif st.session_state.view_selection == "⚙️ Plan":
                 st.rerun()
             else:
                 st.error("Failed to save schedule.")
+
+    st.divider()
+    
+    # 4. Advanced Settings
+    with st.expander("🛠️ Advanced", expanded=False):
+        st.markdown("#### Data Management")
+        st.info("If the AI's tone feels off or you want to start a fresh interaction, you can clear the conversation history here.")
+        if st.button("Clear Chat History", type="secondary", use_container_width=True):
+            if clear_persistent_chat():
+                st.session_state.messages = [{"role": "assistant", "content": "Ready to log. What are we eating?"}]
+                st.success("Chat history cleared!")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("Failed to clear chat history.")
+        
+        st.markdown("#### Demo Mode")
+        current_demo_state = st.session_state.get("enable_demo", False)
+        new_demo_state = st.checkbox(
+            "Enable Demo Data (for testing/showcasing)",
+            value=current_demo_state,
+            help="Toggle this to use pre-populated demo data instead of your own logs. Requires a rerun to take full effect."
+        )
+        if new_demo_state != current_demo_state:
+            st.session_state.enable_demo = new_demo_state
+            st.success(f"Demo mode {'enabled' if new_demo_state else 'disabled'}. Rerunning...")
+            time.sleep(1)
+            st.rerun()
 
     # End of view-specific content
