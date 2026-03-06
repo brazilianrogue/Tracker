@@ -432,7 +432,7 @@ def render_timeline_html(start_time_str, end_time_str, logs, progress_pct=None, 
             
             if side == "top":
                 stem_html = f'<div class="timeline-stem" style="height: {offset_val}px; margin-top: 2px;"></div>'
-                transform = "translate(-50%, -100%)"
+                transform = "translate(-50%, 0)"
                 top_style = f"bottom: 100%; margin-bottom: 0px;"
                 content = f"<div>{primary_emoji}{badge_html}</div>{stem_html}"
             else:
