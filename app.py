@@ -1000,6 +1000,19 @@ nav_html = f"""
     }});
   }}
   
+  // Inject theme color into parent head
+  (function() {{
+      const meta = window.parent.document.createElement('meta');
+      meta.name = "theme-color";
+      meta.content = "#161821";
+      window.parent.document.getElementsByTagName('head')[0].appendChild(meta);
+      
+      const appleMeta = window.parent.document.createElement('meta');
+      appleMeta.name = "apple-mobile-web-app-status-bar-style";
+      appleMeta.content = "black-translucent";
+      window.parent.document.getElementsByTagName('head')[0].appendChild(appleMeta);
+  }})();
+
   // Hide the invisible Streamlit buttons in the parent DOM
   setInterval(() => {{
      const buttons = window.parent.document.querySelectorAll('button p');
@@ -1055,23 +1068,40 @@ def set_view(view):
 
 st.markdown("""
 <style>
+/* Hide the Streamlit Header (GitHub, Fork, Menu) */
+header[data-testid="stHeader"] {{
+    visibility: hidden !important;
+    height: 0 !important;
+}}
+
+/* Extreme Compactness: Remove padding from the main container */
+.block-container {{
+    padding-top: 0rem !important;
+    padding-bottom: 0rem !important;
+    margin-top: -30px !important;
+}}
+
+/* Reduce gap between the custom nav iframe and the dashboard */
+div[data-testid="stVerticalBlock"] > div:has(div[data-testid="stHtml"]) {{
+    margin-bottom: -40px !important;
+}}
+
 /* Robustly hide the H_ bridge buttons and their containers */
-/* Use various selectors to ensure we catch the Streamlit button layout */
 div[data-testid="stBaseButton-secondary"]:has(p:contains("H_")),
 div[data-testid="stHorizontalBlock"] > div:has(button p:contains("H_")),
 div.stButton:has(button p:contains("H_")),
-button[kind="secondary"]:has(p:contains("H_")) {
+button[kind="secondary"]:has(p:contains("H_")) {{
     display: none !important;
     height: 0 !important;
     width: 0 !important;
     margin: 0 !important;
     padding: 0 !important;
     visibility: hidden !important;
-}
+}}
 /* Also target the vertical block spacing */
-div[data-testid="stVerticalBlock"] > div:has(button p:contains("H_")) {
+div[data-testid="stVerticalBlock"] > div:has(button p:contains("H_")) {{
     display: none !important;
-}
+}}
 </style>
 """, unsafe_allow_html=True)
 
