@@ -1,7 +1,9 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from google import genai
 import gspread
 import pandas as pd
+import base64
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import json
@@ -901,36 +903,169 @@ custom_instructions = get_custom_instructions()
 user_goals = get_user_goals()
 SYSTEM_PROMPT = get_system_prompt(fasting_schedule, user_goals, custom_instructions)
 
-# --- 4. Top Navigation ---
+# --- 4. Top Navigation (Custom UI) ---
+
+if "view_selection" not in st.session_state:
+    st.session_state.view_selection = "🍽️ Log"
+current_view = st.session_state.view_selection
+
+def get_image_base64(path):
+    try:
+        with open(path, "rb") as image_file:
+            return f"data:image/png;base64,{base64.b64encode(image_file.read()).decode()}"
+    except:
+        return ""
+logo_b64 = get_image_base64("modern_ratioten_logo.png")
+
+nav_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body {{
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: transparent;
+  }}
+  .nav-bar {{
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    background-color: #161821; /* Dark Tixx like */
+    border-radius: 12px;
+    padding: 0 20px;
+    height: 70px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+  }}
+  .nav-left {{
+    display: flex;
+    align-items: center;
+    grid-column: 1;
+  }}
+  .nav-left img {{
+    height: 32px;
+    margin-right: 12px;
+  }}
+  .nav-left span {{
+    color: white;
+    font-weight: bold;
+    font-size: 18px;
+    letter-spacing: 0.5px;
+  }}
+  .nav-items {{
+    grid-column: 2;
+    display: flex;
+    gap: 30px; /* balanced and centered */
+  }}
+  .nav-item {{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #6a6a8a;
+    text-decoration: none;
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    transition: all 0.2s;
+    height: 70px;
+    border-bottom: 3px solid transparent;
+    box-sizing: border-box;
+    padding-top: 10px;
+  }}
+  .nav-item:hover {{
+    color: #a9a9b8;
+  }}
+  .nav-item.active {{
+    color: #fca311; /* Tixx yellow */
+    border-bottom: 3px solid #fca311;
+  }}
+  .nav-item svg {{
+    margin-bottom: 6px;
+    width: 20px;
+    height: 20px;
+  }}
+  .nav-item.active svg {{
+    stroke: #fca311;
+  }}
+  .nav-right {{
+    grid-column: 3;
+  }}
+</style>
+<script>
+  function switchTab(tab_label) {{
+    const buttons = window.parent.document.querySelectorAll('button p');
+    buttons.forEach(p => {{
+        if (p.textContent === tab_label) {{
+            p.parentElement.click();
+        }}
+    }});
+  }}
+  
+  // Hide the invisible Streamlit buttons in the parent DOM
+  setInterval(() => {{
+     const buttons = window.parent.document.querySelectorAll('button p');
+     buttons.forEach(p => {{
+         if (p.textContent === 'H_LOG' || p.textContent === 'H_ANALYZE' || p.textContent === 'H_PLAN') {{
+             // The structure is usually button > p
+             // We want to hide the surrounding stVerticalBlock or stHorizontalBlock
+             let container = p.parentElement.parentElement;
+             if (container && container.style.display !== 'none') {{
+                 container.style.display = 'none';
+             }}
+         }}
+     }});
+  }}, 100);
+</script>
+</head>
+<body>
+  <div class="nav-bar">
+    <div class="nav-left">
+      <img src="{logo_b64}" onerror="this.style.display='none'">
+      <span>RatioTen</span>
+    </div>
+    <div class="nav-items">
+      <div class="nav-item {'active' if current_view == '🍽️ Log' else ''}" onclick="switchTab('H_LOG')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-house"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span>Home</span>
+      </div>
+      <div class="nav-item {'active' if current_view == '📊 Analyze' else ''}" onclick="switchTab('H_ANALYZE')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bar-chart-2"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
+        <span>Stats</span>
+      </div>
+      <div class="nav-item {'active' if current_view == '⚙️ Plan' else ''}" onclick="switchTab('H_PLAN')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sliders-horizontal"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>
+        <span>Plan</span>
+      </div>
+    </div>
+    <div class="nav-right"></div>
+  </div>
+</body>
+</html>
+"""
+components.html(nav_html, height=85)
+
+# Hidden callback bridge
+def set_view(view):
+    st.session_state.view_selection = view
+
 st.markdown("""
 <style>
-/* Modern styling for the top nav mimicking the Tixx app dashboard */
-div[data-testid="column"] button { border: none !important; background: transparent !important; color: #888899 !important; font-weight: 600; padding: 15px 0px; box-shadow: none !important; transition: all 0.2s ease; border-radius: 8px;}
-div[data-testid="column"] button:hover { color: #FFFFFF !important; background: rgba(255,255,255,0.05) !important; }
-div[data-testid="column"] button:active { background: rgba(255,255,255,0.1) !important; }
+/* Robustly hide the H_ bridge buttons and their containers */
+div[data-testid="stBaseButton-secondary"]:has(p:contains("H_")),
+div[data-testid="stHorizontalBlock"] > div:has(button p:contains("H_")),
+div.stButton:has(button p:contains("H_")) {
+    display: none !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
-nav_cols = st.columns([1.2, 1, 1, 1])
-if "view_selection" not in st.session_state:
-    st.session_state.view_selection = "🍽️ Log"
-
-with nav_cols[0]:
-    try:
-        # Smaller modern logo at the left
-        st.image("modern_ratioten_logo.png", width=60)
-    except:
-        st.markdown("<h3 style='margin:0; padding:0;'>RatioTen</h3>", unsafe_allow_html=True)
-
-with nav_cols[1]:
-    if st.button("🏠 Home", use_container_width=True): 
-        st.session_state.view_selection = "🍽️ Log"
-with nav_cols[2]:
-    if st.button("📊 Stats", use_container_width=True): 
-        st.session_state.view_selection = "📊 Analyze"
-with nav_cols[3]:
-    if st.button("⚙️ Plan", use_container_width=True): 
-        st.session_state.view_selection = "⚙️ Plan"
+with st.container():
+    if st.button("H_LOG", on_click=set_view, args=("🍽️ Log",)): pass
+    if st.button("H_ANALYZE", on_click=set_view, args=("📊 Analyze",)): pass
+    if st.button("H_PLAN", on_click=set_view, args=("⚙️ Plan",)): pass
 
 st.divider()
 
