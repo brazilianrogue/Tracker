@@ -1004,16 +1004,23 @@ nav_html = f"""
   setInterval(() => {{
      const buttons = window.parent.document.querySelectorAll('button p');
      buttons.forEach(p => {{
-         if (p.textContent === 'H_LOG' || p.textContent === 'H_ANALYZE' || p.textContent === 'H_PLAN') {{
-             // The structure is usually button > p
-             // We want to hide the surrounding stVerticalBlock or stHorizontalBlock
-             let container = p.parentElement.parentElement;
-             if (container && container.style.display !== 'none') {{
-                 container.style.display = 'none';
+         if (p.textContent.includes('H_')) {{
+             // The structure in Streamlit is often button > div > span > p or similar
+             // We go up until we find the stButton container
+             let el = p;
+             while (el && !el.classList.contains('stButton') && el !== window.parent.document.body) {{
+                 el = el.parentElement;
+             }}
+             if (el && el.classList.contains('stButton')) {{
+                 el.style.display = 'none';
+                 el.style.height = '0';
+                 el.style.margin = '0';
+                 el.style.padding = '0';
+                 el.style.visibility = 'hidden';
              }}
          }}
      }});
-  }}, 100);
+  }}, 50);
 </script>
 </head>
 <body>
@@ -1073,7 +1080,6 @@ with st.container():
     if st.button("H_ANALYZE", on_click=set_view, args=("📊 Analyze",)): pass
     if st.button("H_PLAN", on_click=set_view, args=("⚙️ Plan",)): pass
 
-st.divider()
 
 # --- 4.5 Modals & Tools ---
 if "enable_demo" not in st.session_state:
@@ -1199,8 +1205,6 @@ if st.session_state.view_selection == "🍽️ Log":
                 st.markdown(timeline_html, unsafe_allow_html=True)
             except Exception as e:
                 pass # Fail silently for UI element
-
-    st.divider()
 
     # --- 5. Initialize Chat History & Session State (Log View Only) ---
     if "messages" not in st.session_state or not st.session_state.messages:
