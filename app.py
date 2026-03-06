@@ -300,8 +300,8 @@ def get_logs_for_history(days=10):
         logs_by_date = {}
         
         for row in values[1:]:
-            if len(row) < 2: continue
-            ts_str = row[0]
+            if not isinstance(row, (list, tuple)) or len(row) < 2: continue
+            ts_str = str(row[0])
             try:
                 ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
                 log_date = ts.date()
@@ -311,8 +311,8 @@ def get_logs_for_history(days=10):
                     if date_key not in logs_by_date:
                         logs_by_date[date_key] = []
                     
-                    item = row[1]
-                    emoji = row[6].strip() if len(row) > 6 and row[6].strip() else "🍽️"
+                    item = str(row[1])
+                    emoji = str(row[6]).strip() if len(row) > 6 and str(row[6]).strip() else "🍽️"
                     logs_by_date[date_key].append({"timestamp": ts, "item": item, "emoji": emoji})
             except:
                 continue
@@ -531,10 +531,10 @@ def get_persistent_chat():
         rows = data[1:]
         history = []
         for row in rows[-30:]: # Last 30 messages for context
-            if len(row) < 3: continue
-            ts = row[0]
-            role = row[1]
-            parts_json = row[2]
+            if not isinstance(row, (list, tuple)) or len(row) < 3: continue
+            ts = str(row[0])
+            role = str(row[1])
+            parts_json = str(row[2])
             try:
                 parts = json.loads(parts_json)
                 content = [p.get("text", "") for p in parts]
@@ -603,9 +603,9 @@ def get_custom_instructions():
         
         instructions = []
         for row in data[1:]:
-            if len(row) >= 2:
-                label = row[0]
-                content = row[1]
+            if isinstance(row, (list, tuple)) and len(row) >= 2:
+                label = str(row[0])
+                content = str(row[1])
                 if content.strip():
                     instructions.append(f"### {label}\n{content}")
         return "\n\n".join(instructions)
@@ -669,7 +669,7 @@ def get_user_goals():
         data = worksheet.get_all_records()
         if not data: return default_goals
             
-        goals = {}
+        goals = {"calories": default_goals["calories"], "protein": default_goals["protein"]}
         for row in data:
             metric = str(row.get("Metric", "")).strip().lower()
             val = row.get("Value", 0)
@@ -721,15 +721,16 @@ def calculate_plan_effectiveness():
             
             # Adherence Check: Count days where density >= 10.0 and calories <= target + 100
             adherent_days = 0
+            target_cal_limit = int(goals.get('calories', 1500)) + 100
             for _, row in daily_summary.iterrows():
-                if row['Density'] >= target_density and row['Calories'] <= goals['calories'] + 100:
+                if float(row['Density']) >= float(target_density) and int(row['Calories']) <= target_cal_limit:
                     adherent_days += 1
-                    
-            total_days_logged = len(daily_summary)
+            
+            total_days_logged = int(len(daily_summary))
             if total_days_logged < 7:
                 return None, "Insufficient food log data (need at least 7 days of logs)."
                 
-            adherence_rate = adherent_days / total_days_logged
+            adherence_rate = float(adherent_days) / float(total_days_logged)
             
         except Exception as e:
             return None, "Error parsing food logs."
@@ -1183,9 +1184,9 @@ if st.session_state.view_selection == "🍽️ Log":
                 start_dt = datetime.combine(now.date(), datetime.strptime(sched["start"], "%H:%M").time()).replace(tzinfo=EASTERN)
                 end_dt = datetime.combine(now.date(), datetime.strptime(sched["end"], "%H:%M").time()).replace(tzinfo=EASTERN)
                 
-                total_duration = (end_dt - start_dt).total_seconds()
-                elapsed = (now - start_dt).total_seconds()
-                progress_pct = max(0, min(100, (elapsed / total_duration) * 100))
+                total_duration = float((end_dt - start_dt).total_seconds())
+                elapsed = float((now - start_dt).total_seconds())
+                progress_pct = max(0.0, min(100.0, (elapsed / total_duration) * 100.0))
                 
                 # Fetch today's food logs for timeline
                 today_logs = get_today_log_for_timeline()
