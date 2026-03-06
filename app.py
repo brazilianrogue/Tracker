@@ -67,14 +67,14 @@ st.markdown("""
     
     /* Reduce the default Streamlit padding for better vertical use */
     .block-container {
-        padding-top: 2rem !important; /* Some padding to avoid clipping at the very top */
+        padding-top: 1px !important; /* Hug the top as requested */
         padding-bottom: 0rem !important;
         margin-top: 0px !important;
     }
 
     /* Target the gaps between blocks */
     div[data-testid="stVerticalBlock"] {
-        gap: 10px !important; /* Added 10px spacing as requested */
+        gap: 5px !important; /* Tighter 5px gap as requested */
     }
 
     /* Specific override for the custom nav container spacing */
@@ -213,34 +213,37 @@ st.markdown("""
 components.html("""
     <script>
         (function() {
-            const head = window.parent.document.head;
-            
-            // Theme color for browser bars / status bar background
-            let meta = window.parent.document.querySelector('meta[name="theme-color"]');
-            if (!meta) {
-                meta = window.parent.document.createElement('meta');
-                meta.name = "theme-color";
-                head.appendChild(meta);
+            function applyTheme() {
+                try {
+                    const targets = [document, window.parent.document];
+                    targets.forEach(doc => {
+                        let meta = doc.querySelector('meta[name="theme-color"]');
+                        if (!meta) {
+                            meta = doc.createElement('meta');
+                            meta.name = "theme-color";
+                            doc.head.appendChild(meta);
+                        }
+                        meta.content = "#161821";
+
+                        let appleMeta = doc.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+                        if (!appleMeta) {
+                            appleMeta = doc.createElement('meta');
+                            appleMeta.name = "apple-mobile-web-app-status-bar-style";
+                            doc.head.appendChild(appleMeta);
+                        }
+                        appleMeta.content = "black-translucent";
+
+                        // Set body background of parent to match
+                        if (doc.body) doc.body.style.backgroundColor = "#161821";
+                    });
+                } catch (e) { console.log("Status bar injection limited by cross-origin policy"); }
             }
-            meta.content = "#161821";
             
-            // Apple status bar style - black-translucent
-            let appleMeta = window.parent.document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
-            if (!appleMeta) {
-                appleMeta = window.parent.document.createElement('meta');
-                appleMeta.name = "apple-mobile-web-app-status-bar-style";
-                head.appendChild(appleMeta);
-            }
-            appleMeta.content = "black-translucent";
-            
-            // Standalone feel
-            let capableMeta = window.parent.document.querySelector('meta[name="apple-mobile-web-app-capable"]');
-            if (!capableMeta) {
-                capableMeta = window.parent.document.createElement('meta');
-                capableMeta.name = "apple-mobile-web-app-capable";
-                head.appendChild(capableMeta);
-            }
-            capableMeta.content = "yes";
+            applyTheme();
+            // Repeat a few times to ensure it sticks after Streamlit hydration
+            setTimeout(applyTheme, 500);
+            setTimeout(applyTheme, 1000);
+            setTimeout(applyTheme, 3000);
         })();
     </script>
     """, height=0, width=0)
