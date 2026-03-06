@@ -207,40 +207,43 @@ st.markdown("""
         font-family: monospace;
     }
     </style>
+    """, unsafe_allow_html=True)
+
+# Inject theme color and status bar style into the head of the main document
+components.html("""
     <script>
-        // Inject theme color and status bar style into the head of the main document
         (function() {
-            const head = document.head;
+            const head = window.parent.document.head;
             
             // Theme color for browser bars / status bar background
-            let meta = document.querySelector('meta[name="theme-color"]');
+            let meta = window.parent.document.querySelector('meta[name="theme-color"]');
             if (!meta) {
-                meta = document.createElement('meta');
+                meta = window.parent.document.createElement('meta');
                 meta.name = "theme-color";
                 head.appendChild(meta);
             }
             meta.content = "#161821";
             
-            // Apple status bar style - black-translucent makes it use the theme color effectively
-            let appleMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+            // Apple status bar style - black-translucent
+            let appleMeta = window.parent.document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
             if (!appleMeta) {
-                appleMeta = document.createElement('meta');
+                appleMeta = window.parent.document.createElement('meta');
                 appleMeta.name = "apple-mobile-web-app-status-bar-style";
                 head.appendChild(appleMeta);
             }
             appleMeta.content = "black-translucent";
             
-            // Also set apple-mobile-web-app-capable to true for standalone feel
-            let capableMeta = document.querySelector('meta[name="apple-mobile-web-app-capable"]');
+            // Standalone feel
+            let capableMeta = window.parent.document.querySelector('meta[name="apple-mobile-web-app-capable"]');
             if (!capableMeta) {
-                capableMeta = document.createElement('meta');
+                capableMeta = window.parent.document.createElement('meta');
                 capableMeta.name = "apple-mobile-web-app-capable";
                 head.appendChild(capableMeta);
             }
             capableMeta.content = "yes";
         })();
     </script>
-    """, unsafe_allow_html=True)
+    """, height=0, width=0)
 
 # --- 2. API Setup ---
 @st.cache_resource
