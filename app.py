@@ -1023,7 +1023,7 @@ def calculate_plan_effectiveness():
         return None, f"Calculation error: {e}"
 
 # --- 3. System Prompt (The Rules Engine) ---
-def get_system_prompt(schedule, goals, custom_instructions="", today_stats=None, weekly_summary=None):
+def get_system_prompt(schedule, goals, custom_instructions="", today_stats=None, weekly_summary=None, today_logs=None):
     now = datetime.now(EASTERN)
     current_day = now.strftime("%A")
     current_date = now.strftime("%Y-%m-%d")
@@ -1048,6 +1048,14 @@ def get_system_prompt(schedule, goals, custom_instructions="", today_stats=None,
 - **Current Density:** {today_stats['density']}
 - **Remaining Calorie Room:** {max(0, goals['calories'] - today_stats['cals'])}
 - **Remaining Protein Needed:** {max(0, goals['protein'] - today_stats['protein'])}g
+"""
+
+    logs_context = ""
+    if today_logs:
+        logs_text = "\n".join([f"- {log['item']} ({log['emoji']})" for log in today_logs])
+        logs_context = f"""
+### TODAY'S EXPLICIT FOOD LOGS:
+{logs_text}
 """
 
     weekly_context = ""
@@ -1077,6 +1085,7 @@ Core Logic:
 - For example: an item with 150 calories and 30g protein has a density of 30 / 150 = 0.20 = 20.0%.
 
 {stats_context}
+{logs_context}
 {weekly_context}
 
 Fasting Protocol Strict Adherence:
@@ -1452,8 +1461,24 @@ if st.session_state.view_selection == "🍽️ Log":
 
     if "chat_session" not in st.session_state:
         current_stats = {'cals': cals, 'protein': protein, 'density': density}
-        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
-        st.session_state.chat_session = get_chat_session(st.session_state.current_model, fresh_prompt)
+        today_logs = get_today_log_for_timeline()
+        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days, today_logs=today_logs)
+        
+        formatted_history = []
+        for msg in st.session_state.messages:
+            role = "user" if msg["role"] == "user" else "model"
+            parts = []
+            content = msg["content"]
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, str):
+                        parts.append(genai.types.Part.from_text(text=item))
+            elif isinstance(content, str):
+                parts.append(genai.types.Part.from_text(text=content))
+            if parts:
+                formatted_history.append(genai.types.Content(role=role, parts=parts))
+                
+        st.session_state.chat_session = get_chat_session(st.session_state.current_model, fresh_prompt, history=formatted_history)
 
     # Display previous chat messages in a fixed-height container (optimized for Pro Max)
     with st.container(height=450):
@@ -1531,7 +1556,8 @@ if st.session_state.view_selection == "🍽️ Log":
                     try:
                         # Refresh session with latest stats for proactive auditing
                         current_stats = {'cals': cals, 'protein': protein, 'density': density}
-                        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
+                        today_logs = get_today_log_for_timeline()
+                        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days, today_logs=today_logs)
                         
                         existing_session = st.session_state.get("chat_session")
                         existing_history = getattr(existing_session, "history", getattr(existing_session, "_history", None)) if existing_session else None
@@ -1567,7 +1593,8 @@ if st.session_state.view_selection == "🍽️ Log":
                         st.session_state.current_model = SECONDARY_MODEL
                         
                         current_stats = {'cals': cals, 'protein': protein, 'density': density}
-                        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
+                        today_logs = get_today_log_for_timeline()
+                        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days, today_logs=today_logs)
                         
                         st.session_state.chat_session = get_chat_session(SECONDARY_MODEL, fresh_prompt, history=existing_history)
                         response = st.session_state.chat_session.send_message(message_content)
@@ -1585,7 +1612,8 @@ if st.session_state.view_selection == "🍽️ Log":
                         st.session_state.current_model = STABLE_MODEL
                         
                         current_stats = {'cals': cals, 'protein': protein, 'density': density}
-                        fresh_prompt = get_system_prompt(fasting_schedule, custom_instructions, today_stats=current_stats, weekly_summary=df_7days)
+                        today_logs = get_today_log_for_timeline()
+                        fresh_prompt = get_system_prompt(fasting_schedule, user_goals, custom_instructions, today_stats=current_stats, weekly_summary=df_7days, today_logs=today_logs)
                         
                         st.session_state.chat_session = get_chat_session(STABLE_MODEL, fresh_prompt, history=existing_history)
                         response = st.session_state.chat_session.send_message(message_content)
@@ -1612,14 +1640,38 @@ if st.session_state.view_selection == "🍽️ Log":
                     if match:
                         try:
                             items_to_log = json.loads(match.group(1))
+                            today_logs_data = get_today_log_for_timeline()
+                            
+                            valid_items_to_log = []
                             for data in items_to_log:
+                                item_name = data.get("item", "Unknown").strip().lower()
+                                
+                                # Check for duplicates today
+                                is_duplicate = False
+                                for log in today_logs_data:
+                                    if log.get("item", "").strip().lower() == item_name:
+                                        is_duplicate = True
+                                        break
+                                
+                                conf_key = f"confirm_{item_name}"
+                                if is_duplicate and not st.session_state.get(conf_key, False):
+                                    st.session_state[conf_key] = True
+                                    display_text += f"\n\n**⚠️ System Notice:** You already logged '{data.get('item')}' today. Are you logging another one? *(Reply 'yes' to confirm)*"
+                                else:
+                                    valid_items_to_log.append(data)
+                                    if st.session_state.get(conf_key, False):
+                                        st.session_state[conf_key] = False
+
+                            for data in valid_items_to_log:
                                 if log_to_sheet(data.get("item", "Unknown"), 
                                                data.get("calories", 0), 
                                                data.get("protein", 0), 
                                                data.get("density", "0%"),
                                                data.get("emoji", "🍽️")):
                                     st.toast(f"Logged: {data.get('item')} {data.get('emoji', '🍽️')}")
-                            get_trailing_7_days_data.clear()
+                            
+                            if valid_items_to_log:
+                                get_trailing_7_days_data.clear()
                         except Exception as e:
                             st.error(f"Logging error: {e}")
                     
