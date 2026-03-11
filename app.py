@@ -1899,19 +1899,26 @@ elif st.session_state.view_selection == "📊 Analyze":
         weight_msg = "Losing" if drivers['weight_shift'] >= 0.8 else ("Steady" if drivers['weight_shift'] >= 0 else "Gaining")
         logging_pct = (drivers['total_days'] / 14) * 100
         logging_status = "status-ok" if logging_pct >= 80 else ("status-warn" if logging_pct >= 60 else "status-crit")
-        logging_msg = "Reliable" if logging_pct >= 80 else ("Partial" if logging_pct >= 60 else "Incomplete")
+        logging_msg = "Consistent" if logging_pct >= 80 else ("Partial" if logging_pct >= 60 else "Sparse")
 
         icon_check = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
         icon_zap   = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
         icon_trend = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>'
         icon_clip  = '<svg class="driver-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>'
 
+        tip_protocol = "Rate of days hitting Protein & Calorie targets.&#10;Statuses:&#10;• Optimal (≥85%)&#10;• Inconsistent (70-84%)&#10;• Needs Focus (<70%)"
+        tip_protein = "Average Protein Density (Protein/Calories) across logged days.&#10;Statuses:&#10;• Lean (≥10.5%)&#10;• Moderate (9.5-10.4%)&#10;• Improve (<9.5%)"
+        tip_weight = "14-day weight shift (Week 1 vs Week 2).&#10;Statuses:&#10;• Losing (≥0.8 lbs drop)&#10;• Steady (0-0.7 lbs drop)&#10;• Gaining (Weight increased)"
+        tip_logging = "Percentage of days logged in the past 14 days.&#10;Statuses:&#10;• Consistent (≥80%)&#10;• Partial (60-79%)&#10;• Sparse (<60%)"
+
+        display_weight = -drivers['weight_shift'] if drivers['weight_shift'] != 0 else 0.0
+
         drivers_html = f"""
         <div class="driver-grid">
-            <div class="driver-card">{icon_check}<div class="driver-label">Protocol Success</div><div class="driver-value">{drivers['adherent_days']}/{drivers['total_days']} Days</div><div class="driver-status {adherence_status}">{adherence_msg}</div></div>
-            <div class="driver-card">{icon_zap}<div class="driver-label">Avg Protein</div><div class="driver-value">{drivers['avg_density']:.1f}%</div><div class="driver-status {density_status}">{density_msg}</div></div>
-            <div class="driver-card">{icon_trend}<div class="driver-label">Scale Velocity</div><div class="driver-value">{drivers['weight_shift']:+.1f} lbs</div><div class="driver-status {weight_status}">{weight_msg}</div></div>
-            <div class="driver-card">{icon_clip}<div class="driver-label">Logging Rank</div><div class="driver-value">{int(logging_pct)}%</div><div class="driver-status {logging_status}">{logging_msg}</div></div>
+            <div class="driver-card" title="{tip_protocol}">{icon_check}<div class="driver-label">Protocol Success</div><div class="driver-value">{drivers['adherent_days']}/{drivers['total_days']} Days</div><div class="driver-status {adherence_status}">{adherence_msg}</div></div>
+            <div class="driver-card" title="{tip_protein}">{icon_zap}<div class="driver-label">Avg Protein</div><div class="driver-value">{drivers['avg_density']:.1f}%</div><div class="driver-status {density_status}">{density_msg}</div></div>
+            <div class="driver-card" title="{tip_weight}">{icon_trend}<div class="driver-label">Weight Trend</div><div class="driver-value">{display_weight:+.1f} lbs</div><div class="driver-status {weight_status}">{weight_msg}</div></div>
+            <div class="driver-card" title="{tip_logging}">{icon_clip}<div class="driver-label">Logging Consistency</div><div class="driver-value">{int(logging_pct)}%</div><div class="driver-status {logging_status}">{logging_msg}</div></div>
         </div>
         """
         st.markdown(drivers_html, unsafe_allow_html=True)
