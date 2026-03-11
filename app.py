@@ -926,12 +926,11 @@ def get_user_goals():
     except Exception as e:
         return default_goals
 
-@st.cache_data(ttl=3600)
 def calculate_plan_effectiveness():
     """Calculates a score (1-10) based on 14-day adherence and weight shift."""
     try:
+        # --- Demo Mode Shortcut ---
         if st.session_state.get("demo_mode", False):
-            # Mock data for demonstration
             drivers = {
                 "adherent_days": 11,
                 "total_days": 13,
@@ -939,112 +938,125 @@ def calculate_plan_effectiveness():
                 "weight_shift": 1.4
             }
             return 8.7, None, drivers
-            
-        sh = get_google_sheet()
-        goals = get_user_goals()
-        target_density = 10.0 # Default threshold
-        
-        # 1. Get last 14 days of food logs
-        try:
-            food_ws = sh.worksheet("Food_Logs")
-            food_records = food_ws.get_all_records()
-            if not food_records:
-                return None, "No food log data found.", None
-            
-            df_food = pd.DataFrame(food_records)
-            df_food['Date'] = pd.to_datetime(df_food['Date']).dt.date
-            
-            fourteen_days_ago = (datetime.now(EASTERN) - timedelta(days=14)).date()
-            seven_days_ago = (datetime.now(EASTERN) - timedelta(days=7)).date()
-            
-            df_food = df_food[df_food['Date'] >= fourteen_days_ago]
-            if df_food.empty:
-                return None, "Insufficient food log data (need logs from last 14 days).", None
-                
-            daily_summary = df_food.groupby('Date')[['Calories', 'Protein']].sum().reset_index()
-            daily_summary['Density'] = (daily_summary['Protein'] / daily_summary['Calories']) * 100
-            
-            # Adherence Check: Count days where density >= 10.0 and calories <= target + 100
-            adherent_days = 0
-            target_cal_limit = int(goals.get('calories', 1500)) + 100
-            for _, row in daily_summary.iterrows():
-                if float(row['Density']) >= float(target_density) and int(row['Calories']) <= target_cal_limit:
-                    adherent_days += 1
-            
-            total_days_logged = int(len(daily_summary))
-            if total_days_logged < 7:
-                return None, "Insufficient food log data (need at least 7 days of logs).", None
-                
-            adherence_rate = float(adherent_days) / float(total_days_logged)
-            avg_density = daily_summary['Density'].mean()
-            
-        except Exception as e:
-            return None, "Error parsing food logs.", None
 
-        # 3. Get last 14 days of weight logs
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+
+        goals = get_user_goals()
+        target_density = 10.0
+        target_cal_limit = int(goals.get('calories', 1500)) + 100
+
+        fourteen_days_ago = (datetime.now(EASTERN) - timedelta(days=14)).date()
+        seven_days_ago = (datetime.now(EASTERN) - timedelta(days=7)).date()
+
+        # --- 1. Food Logs (sheet1, same pattern as get_trailing_7_days_data) ---
         try:
-            weight_ws = sh.worksheet("Weight_Logs")
+            food_ws = sh.sheet1
+            values = food_ws.get_all_values()
+            if not values or len(values) <= 1:
+                return None, "No food log data found.", None
+
+            headers = values[0]
+            col_map = {h.strip(): i for i, h in enumerate(headers)}
+            date_idx = col_map.get("Date", 0)
+            cal_idx = col_map.get("Calories", 2)
+            prot_idx = col_map.get("Protein", 3)
+
+            daily_data = {}
+            for row in values[1:]:
+                try:
+                    if len(row) <= max(date_idx, cal_idx, prot_idx):
+                        continue
+                    dt = pd.to_datetime(row[date_idx])
+                    log_date = dt.date()
+                    if log_date < fourteen_days_ago:
+                        continue
+                    cals = float(row[cal_idx]) if row[cal_idx] else 0.0
+                    prot = float(row[prot_idx]) if row[prot_idx] else 0.0
+                    if log_date not in daily_data:
+                        daily_data[log_date] = {"cals": 0.0, "prot": 0.0}
+                    daily_data[log_date]["cals"] += cals
+                    daily_data[log_date]["prot"] += prot
+                except:
+                    continue
+
+            if not daily_data:
+                return None, "No food log data in last 14 days.", None
+
+            total_days_logged = len(daily_data)
+            if total_days_logged < 7:
+                return None, f"Need 7+ logged days. Currently have {total_days_logged}.", None
+
+            adherent_days = 0
+            density_sum = 0.0
+            for nums in daily_data.values():
+                density = (nums["prot"] / nums["cals"] * 100) if nums["cals"] > 0 else 0.0
+                density_sum += density
+                if density >= target_density and nums["cals"] <= target_cal_limit:
+                    adherent_days += 1
+
+            adherence_rate = adherent_days / total_days_logged
+            avg_density = density_sum / total_days_logged
+
+        except Exception as e:
+            return None, f"Error parsing food logs: {str(e)}", None
+
+        # --- 2. Weight Logs (Weight_Logs tab) ---
+        try:
+            try:
+                weight_ws = sh.worksheet("Weight_Logs")
+            except gspread.WorksheetNotFound:
+                return None, "Weight_Logs sheet not found.", None
+
             weight_records = weight_ws.get_all_records()
             if not weight_records:
-                return None, "No weight data found in 'Weight_Logs' sheet.", None
-                
+                return None, "No weight data found.", None
+
             df_weight = pd.DataFrame(weight_records)
-            
-            # Robust Column Mapping
-            col_map = {col.lower().strip(): col for col in df_weight.columns}
-            date_col = next((col_map[c] for c in ['date', 'timestamp', 'time', 'day'] if c in col_map), None)
-            weight_col = next((col_map[c] for c in ['weight (lbs)', 'weight', 'lbs', 'mass'] if c in col_map), None)
-            
+            col_map_w = {col.lower().strip(): col for col in df_weight.columns}
+            date_col = next((col_map_w[c] for c in ['date', 'timestamp', 'time'] if c in col_map_w), None)
+            weight_col = next((col_map_w[c] for c in ['weight (lbs)', 'weight', 'lbs'] if c in col_map_w), None)
+
             if not date_col or not weight_col:
-                found_cols = ", ".join(df_weight.columns)
-                return None, f"Weight_Logs missing required columns. Found: {found_cols}", None
+                return None, f"Weight_Logs columns not found. Got: {list(df_weight.columns)}", None
 
             df_weight['Date'] = pd.to_datetime(df_weight[date_col], errors='coerce').dt.date
             df_weight['Weight'] = pd.to_numeric(df_weight[weight_col], errors='coerce')
-            
             df_recent = df_weight[df_weight['Date'] >= fourteen_days_ago].dropna(subset=['Weight'])
+
             if len(df_recent) < 4:
-                return None, f"Insufficient weight data (need 4 weigh-ins, found {len(df_recent)}).", None
-                
-            # Delta between first 7 days min and last 7 days min
+                return None, f"Need 4+ weigh-ins in 14 days. Have {len(df_recent)}.", None
+
             first_half = df_recent[df_recent['Date'] < seven_days_ago]
             second_half = df_recent[df_recent['Date'] >= seven_days_ago]
-            
+
             if first_half.empty or second_half.empty:
-               return None, "Insufficient weight distribution (need weigh-ins in both weeks).", None
-               
-            w1_min = first_half['Weight'].min()
-            w2_min = second_half['Weight'].min()
-            weight_delta = w1_min - w2_min # Positive means weight loss
-            
+                return None, "Need weigh-ins in both weeks of the 14-day window.", None
+
+            weight_delta = float(first_half['Weight'].min()) - float(second_half['Weight'].min())
+
         except Exception as e:
             return None, f"Error parsing weight logs: {str(e)}", None
 
-        # 4. Calculate Score 
-        # Base score on adherence (0 to 5 pts)
+        # --- 3. Score Calculation ---
         score = adherence_rate * 5.0
-        
-        # Add points for weight loss (up to 5 pts)
         if weight_delta >= 1.0:
             score += 5.0
         elif weight_delta >= 0:
-            # Scale 0 to 1.0 lbs loss to 2.0 to 4.9 pts
             score += 2.0 + (weight_delta * 2.9)
         elif weight_delta < -0.5:
-            # Penalize gain
             score -= 2.0
-            
+
         score = max(1.0, min(10.0, score))
-        
-        drivers = {
+
+        return score, None, {
             "adherent_days": adherent_days,
             "total_days": total_days_logged,
             "avg_density": avg_density,
             "weight_shift": weight_delta
         }
-        
-        return score, None, drivers
-        
+
     except Exception as e:
         return None, f"System Error: {str(e)}", None
 
