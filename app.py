@@ -1002,8 +1002,9 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
         target_density = 10.0
         target_cal_limit = int(goals.get('calories', 1500)) + 100
 
-        fourteen_days_ago = calc_date - timedelta(days=14)
-        seven_days_ago = calc_date - timedelta(days=7)
+        # A 14-day inclusive window means calc_date to 13 days prior
+        thirteen_days_ago = calc_date - timedelta(days=13)
+        seven_days_ago = calc_date - timedelta(days=6) # 7 day window
 
         # --- 1. Food Logs (sheet1, same pattern as get_trailing_7_days_data) ---
         try:
@@ -1025,7 +1026,7 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
                         continue
                     dt = pd.to_datetime(row[date_idx])
                     log_date = dt.date()
-                    if log_date < fourteen_days_ago or log_date > calc_date:
+                    if log_date < thirteen_days_ago or log_date > calc_date:
                         continue
                     cals = float(row[cal_idx]) if row[cal_idx] else 0.0
                     prot = float(row[prot_idx]) if row[prot_idx] else 0.0
@@ -1164,7 +1165,7 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
 
             df_weight['Date'] = pd.to_datetime(df_weight[date_col], errors='coerce').dt.date
             df_weight['Weight'] = pd.to_numeric(df_weight[weight_col], errors='coerce')
-            df_recent = df_weight[df_weight['Date'] >= fourteen_days_ago].dropna(subset=['Weight'])
+            df_recent = df_weight[(df_weight['Date'] >= thirteen_days_ago) & (df_weight['Date'] <= calc_date)].dropna(subset=['Weight'])
 
             if len(df_recent) < 4:
                 return None, f"Need 4+ weigh-ins in 14 days. Have {len(df_recent)}.", None
@@ -1251,6 +1252,7 @@ def sync_plan_effectiveness_logs():
                     
                     # The "Ad Score" column in the log will now show the DAILY performance (0-5)
                     # to match user expectation, while the Plan Score shows the rolling result.
+                    day_score = cal_pts + prot_pts + time_pts
                     day_ad_score = day_score / 2.0
                     
                     weight_shift = drivers.get("weight_shift", 0.0)
