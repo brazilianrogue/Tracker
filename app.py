@@ -975,7 +975,7 @@ def get_user_goals():
     except Exception as e:
         return default_goals
 
-def calculate_plan_effectiveness(calc_date=None):
+def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pre_fasting=None):
     """Calculates a score (1-10) based on 14-day adherence and weight shift."""
     try:
         if calc_date is None:
@@ -991,11 +991,14 @@ def calculate_plan_effectiveness(calc_date=None):
             }
             return 8.7, None, drivers
 
-        credentials_dict = dict(st.secrets["gcp_service_account"])
-        gc = gspread.service_account_from_dict(credentials_dict)
-        sh = gc.open("Nutrition_Logs")
+        if pre_sh:
+            sh = pre_sh
+        else:
+            credentials_dict = dict(st.secrets["gcp_service_account"])
+            gc = gspread.service_account_from_dict(credentials_dict)
+            sh = gc.open("Nutrition_Logs")
 
-        goals = get_user_goals()
+        goals = pre_goals if pre_goals else get_user_goals()
         target_density = 10.0
         target_cal_limit = int(goals.get('calories', 1500)) + 100
 
@@ -1041,7 +1044,7 @@ def calculate_plan_effectiveness(calc_date=None):
                 min_date = fourteen_days_ago
             max_date = calc_date
             
-            fasting_schedule = get_fasting_schedule()
+            fasting_schedule = pre_fasting if pre_fasting else get_fasting_schedule()
             
             current_d = min_date
             while current_d <= max_date:
@@ -1209,14 +1212,17 @@ def calculate_plan_effectiveness(calc_date=None):
 
 def sync_plan_effectiveness_logs():
     """Backfills and continuously logs the explicit daily plan effectiveness scores to the database."""
-    # Don't run in demo mode
     if st.session_state.get("demo_mode", False): return
     
-    st.toast("DEBUG: Syncing Plan Effectiveness Logs...", icon="⏳")
     try:
         credentials_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
+        
+        # Pre-fetch all expensive data once for the batch
+        all_goals = get_user_goals()
+        all_fasting = get_fasting_schedule()
+        
         try:
             log_ws = sh.worksheet("Plan_Effectiveness_Logs")
         except gspread.WorksheetNotFound:
@@ -1235,13 +1241,17 @@ def sync_plan_effectiveness_logs():
             date_str = target_date.strftime("%Y-%m-%d")
             
             if date_str not in logged_dates:
-                # Calculate for target_date
-                score, _, drivers = calculate_plan_effectiveness(calc_date=target_date)
+                # Optimized call with pre-fetched sheet/goals/fasting
+                score, _, drivers = calculate_plan_effectiveness(
+                    calc_date=target_date, 
+                    pre_sh=sh, 
+                    pre_goals=all_goals, 
+                    pre_fasting=all_fasting
+                )
                 if score is not None and drivers:
                     daily_breakdown = drivers.get("daily_breakdown", {})
                     day_data = daily_breakdown.get(target_date, {})
                     
-                    # If there's no data for that day, it gets 0s. 
                     cal_pts = day_data.get("cal_pts", 0.0)
                     prot_pts = day_data.get("prot_pts", 0.0)
                     time_pts = day_data.get("time_pts", 0.0)
@@ -1250,22 +1260,15 @@ def sync_plan_effectiveness_logs():
                     weight_shift = drivers.get("weight_shift", 0.0)
                     
                     log_ws.append_row([
-                        date_str,
-                        cal_pts,
-                        prot_pts,
-                        time_pts,
-                        round(ad_score, 2),
-                        round(weight_shift, 2),
-                        round(score, 2)
+                        date_str, cal_pts, prot_pts, time_pts,
+                        round(ad_score, 2), round(weight_shift, 2), round(score, 2)
                     ])
-                    # Respect Google Sheets append quotas
-                    time.sleep(1.0)
+                    time.sleep(1.0) # Respect rate limits
                     days_logged_this_run += 1
-                    if days_logged_this_run >= 5: # Limit batching to prevent heavy load
+                    if days_logged_this_run >= 10: # More aggressive batching now that it's optimized
                         break
     except Exception as e:
-        st.error(f"DEBUG: Sync Error: {e}")
-        time.sleep(2) # Prevent rapid error loops if it re-runs
+        pass
 
 # Run the sync silently in the background
 if "plan_effectiveness_synced" not in st.session_state:
