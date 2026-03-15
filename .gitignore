@@ -3,3 +3,10 @@ __pycache__/
 .streamlit/secrets.toml
 *.json
 .DS_Store
+
+# Claude Code working files
+.claude/
+
+# Compiled binaries and local PIL installs
+PIL/
+*.pyd
