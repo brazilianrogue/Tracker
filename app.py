@@ -1237,9 +1237,9 @@ def sync_plan_effectiveness_logs(force_resync=False):
         now = datetime.now(EASTERN).date()
         backfill_range = 21 if force_resync else 14
         
-        # Test the backfill days
+        # Test the backfill days (Yesterday moving backwards)
         days_logged_this_run = 0
-        for i in range(backfill_range, 0, -1):
+        for i in range(1, backfill_range + 1):
             target_date = now - timedelta(days=i)
             date_str = target_date.strftime("%Y-%m-%d")
             
