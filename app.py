@@ -1025,7 +1025,7 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
                         continue
                     dt = pd.to_datetime(row[date_idx])
                     log_date = dt.date()
-                    if log_date < fourteen_days_ago:
+                    if log_date < fourteen_days_ago or log_date > calc_date:
                         continue
                     cals = float(row[cal_idx]) if row[cal_idx] else 0.0
                     prot = float(row[prot_idx]) if row[prot_idx] else 0.0
@@ -1037,27 +1037,20 @@ def calculate_plan_effectiveness(calc_date=None, pre_sh=None, pre_goals=None, pr
                 except:
                     continue
 
-            # Fill in missing (skip) days up to today
-            if daily_data:
-                min_date = min(daily_data.keys())
-            else:
-                min_date = fourteen_days_ago
-            max_date = calc_date
-            
-            fasting_schedule = pre_fasting if pre_fasting else get_fasting_schedule()
-            
-            current_d = min_date
-            while current_d <= max_date:
-                if current_d not in daily_data:
-                    day_name = current_d.strftime("%A")
+            # Always evaluate exactly 14 days ending at calc_date
+            for i in range(14):
+                eval_date = calc_date - timedelta(days=i)
+                if eval_date not in daily_data:
+                    day_name = eval_date.strftime("%A")
                     sched = fasting_schedule.get(day_name, {"start": None, "end": None})
-                    if not sched["start"]:
-                        daily_data[current_d] = {"cals": 0.0, "prot": 0.0, "logs": []}
-                current_d += timedelta(days=1)
-
-            total_days_eval = len(daily_data)
-            if total_days_eval < 7:
-                return None, f"Need 7+ days evaluated. Currently have {total_days_eval}.", None
+                    # Add as empty entry (0 cals/prot)
+                    daily_data[eval_date] = {"cals": 0.0, "prot": 0.0, "logs": [], "is_missing": True}
+            
+            total_days_eval = 14
+            # We still need at least 7 days of actual logging or skip days to return a score
+            days_with_data = sum(1 for d in daily_data.values() if not d.get("is_missing", False))
+            if days_with_data < 7:
+                return None, f"Need 7+ days of data. Currently have {days_with_data}.", None
 
             adherence_score_total = 0.0
             sum_cals = 0.0
@@ -1256,12 +1249,15 @@ def sync_plan_effectiveness_logs():
                     prot_pts = day_data.get("prot_pts", 0.0)
                     time_pts = day_data.get("time_pts", 0.0)
                     
-                    ad_score = drivers.get("adherence_rate", 0.0) * 5.0
+                    # The "Ad Score" column in the log will now show the DAILY performance (0-5)
+                    # to match user expectation, while the Plan Score shows the rolling result.
+                    day_ad_score = day_score / 2.0
+                    
                     weight_shift = drivers.get("weight_shift", 0.0)
                     
                     log_ws.append_row([
                         date_str, cal_pts, prot_pts, time_pts,
-                        round(ad_score, 2), round(weight_shift, 2), round(score, 2)
+                        round(day_ad_score, 2), round(weight_shift, 2), round(score, 2)
                     ])
                     time.sleep(1.0) # Respect rate limits
                     days_logged_this_run += 1
