@@ -975,9 +975,12 @@ def get_user_goals():
     except Exception as e:
         return default_goals
 
-def calculate_plan_effectiveness():
+def calculate_plan_effectiveness(calc_date=None):
     """Calculates a score (1-10) based on 14-day adherence and weight shift."""
     try:
+        if calc_date is None:
+            calc_date = datetime.now(EASTERN).date()
+            
         # --- Demo Mode Shortcut ---
         if st.session_state.get("demo_mode", False):
             drivers = {
@@ -996,8 +999,8 @@ def calculate_plan_effectiveness():
         target_density = 10.0
         target_cal_limit = int(goals.get('calories', 1500)) + 100
 
-        fourteen_days_ago = (datetime.now(EASTERN) - timedelta(days=14)).date()
-        seven_days_ago = (datetime.now(EASTERN) - timedelta(days=7)).date()
+        fourteen_days_ago = calc_date - timedelta(days=14)
+        seven_days_ago = calc_date - timedelta(days=7)
 
         # --- 1. Food Logs (sheet1, same pattern as get_trailing_7_days_data) ---
         try:
@@ -1036,7 +1039,7 @@ def calculate_plan_effectiveness():
                 min_date = min(daily_data.keys())
             else:
                 min_date = fourteen_days_ago
-            max_date = datetime.now(EASTERN).date()
+            max_date = calc_date
             
             fasting_schedule = get_fasting_schedule()
             
@@ -1057,6 +1060,7 @@ def calculate_plan_effectiveness():
             sum_cals = 0.0
             sum_prot = 0.0
             
+            daily_breakdown = {}
             for log_date, nums in daily_data.items():
                 day_name = log_date.strftime("%A")
                 sched = fasting_schedule.get(day_name, {"start": None, "end": None})
@@ -1088,19 +1092,20 @@ def calculate_plan_effectiveness():
                 sum_cals += nums["cals"]
                 sum_prot += nums["prot"]
 
-                day_score = 0.0
+                cal_pts_awarded = 0.0
+                prot_pts_awarded = 0.0
 
                 # 1. Calories (4 pts)
                 if nums["cals"] <= target_cal_limit:
-                    day_score += 4.0
+                    cal_pts_awarded = 4.0
                 elif nums["cals"] <= target_cal_limit + 200:
-                    day_score += 2.0
+                    cal_pts_awarded = 2.0
                 
                 # 2. Protein (4 pts)
                 if nums["prot"] >= dynamic_floor:
-                    day_score += 4.0
+                    prot_pts_awarded = 4.0
                 elif nums["prot"] >= (dynamic_floor * 0.8):
-                    day_score += 2.0
+                    prot_pts_awarded = 2.0
 
                 # 3. Fasting Timing (2 pts)
                 timing_pts = 0.0
@@ -1128,8 +1133,13 @@ def calculate_plan_effectiveness():
                         except:
                             timing_pts = 2.0 # Benefit of doubt for parsing errors
                 
-                day_score += timing_pts
+                day_score = cal_pts_awarded + prot_pts_awarded + timing_pts
                 adherence_score_total += (day_score / 10.0)
+                daily_breakdown[log_date] = {
+                    "cal_pts": cal_pts_awarded,
+                    "prot_pts": prot_pts_awarded,
+                    "time_pts": timing_pts
+                }
 
             adherence_rate = adherence_score_total / total_days_eval
             avg_density = (sum_prot / sum_cals * 100) if sum_cals > 0 else 0.0
@@ -1189,11 +1199,78 @@ def calculate_plan_effectiveness():
             "adherent_days": round(adherence_score_total, 1),
             "total_days": total_days_eval,
             "avg_density": avg_density,
-            "weight_shift": weight_delta
+            "weight_shift": weight_delta,
+            "adherence_rate": adherence_rate,
+            "daily_breakdown": daily_breakdown
         }
 
     except Exception as e:
         return None, f"System Error: {str(e)}", None
+
+def sync_plan_effectiveness_logs():
+    """Backfills and continuously logs the explicit daily plan effectiveness scores to the database."""
+    # Don't run in demo mode
+    if st.session_state.get("demo_mode", False): return
+    
+    st.toast("DEBUG: Syncing Plan Effectiveness Logs...", icon="⏳")
+    try:
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials_dict)
+        sh = gc.open("Nutrition_Logs")
+        try:
+            log_ws = sh.worksheet("Plan_Effectiveness_Logs")
+        except gspread.WorksheetNotFound:
+            log_ws = sh.add_worksheet(title="Plan_Effectiveness_Logs", rows="100", cols="7")
+            log_ws.append_row(["Date", "Calorie Pts", "Protein Pts", "Fast Timing Pts", "Ad Score", "Weight Shift", "Plan Score"])
+            
+        data = log_ws.get_all_values()
+        logged_dates = set([row[0] for row in data[1:]]) if len(data) > 1 else set()
+        
+        now = datetime.now(EASTERN).date()
+        
+        # Test the last 14 completed days (yesterday backwards)
+        days_logged_this_run = 0
+        for i in range(14, 0, -1):
+            target_date = now - timedelta(days=i)
+            date_str = target_date.strftime("%Y-%m-%d")
+            
+            if date_str not in logged_dates:
+                # Calculate for target_date
+                score, _, drivers = calculate_plan_effectiveness(calc_date=target_date)
+                if score is not None and drivers:
+                    daily_breakdown = drivers.get("daily_breakdown", {})
+                    day_data = daily_breakdown.get(target_date, {})
+                    
+                    # If there's no data for that day, it gets 0s. 
+                    cal_pts = day_data.get("cal_pts", 0.0)
+                    prot_pts = day_data.get("prot_pts", 0.0)
+                    time_pts = day_data.get("time_pts", 0.0)
+                    
+                    ad_score = drivers.get("adherence_rate", 0.0) * 5.0
+                    weight_shift = drivers.get("weight_shift", 0.0)
+                    
+                    log_ws.append_row([
+                        date_str,
+                        cal_pts,
+                        prot_pts,
+                        time_pts,
+                        round(ad_score, 2),
+                        round(weight_shift, 2),
+                        round(score, 2)
+                    ])
+                    # Respect Google Sheets append quotas
+                    time.sleep(1.0)
+                    days_logged_this_run += 1
+                    if days_logged_this_run >= 5: # Limit batching to prevent heavy load
+                        break
+    except Exception as e:
+        st.error(f"DEBUG: Sync Error: {e}")
+        time.sleep(2) # Prevent rapid error loops if it re-runs
+
+# Run the sync silently in the background
+if "plan_effectiveness_synced" not in st.session_state:
+    st.session_state.plan_effectiveness_synced = True
+    sync_plan_effectiveness_logs()
 
 # --- 3. System Prompt (The Rules Engine) ---
 def get_system_prompt(schedule, goals, custom_instructions="", today_stats=None, weekly_summary=None, today_logs=None):
