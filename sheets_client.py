@@ -9,10 +9,11 @@ change only requires editing one file.
 """
 from __future__ import annotations
 
+import json
+import os
 from typing import TypedDict
 
 import gspread
-import streamlit as st
 
 from constants import SPREADSHEET_NAME
 
@@ -60,6 +61,6 @@ class MealLogEntry(TypedDict):
 
 def open_sheet() -> gspread.Spreadsheet:
     """Open the shared RatioTen spreadsheet using service-account credentials."""
-    credentials_dict = dict(st.secrets["gcp_service_account"])
+    credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
     gc = gspread.service_account_from_dict(credentials_dict)
     return gc.open(SPREADSHEET_NAME)

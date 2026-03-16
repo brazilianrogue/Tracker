@@ -396,13 +396,13 @@ components.html("""
 # --- 2. API Setup ---
 @st.cache_resource
 def get_client():
-    return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+    return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 client = get_client()
 
 @st.cache_resource
 def get_google_sheet():
-    credentials_dict = dict(st.secrets["gcp_service_account"])
+    credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
     gc = gspread.service_account_from_dict(credentials_dict)
     return gc.open("Nutrition_Logs")
 
@@ -565,7 +565,7 @@ def get_trailing_7_days_data() -> pd.DataFrame:
     # Define expected columns
     expected_cols = ["Date", "Item", "Calories", "Protein", "Density"]
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         worksheet = sh.sheet1
@@ -616,7 +616,7 @@ def get_today_log_for_timeline() -> list:
 @st.cache_data(ttl=300)
 def get_logs_for_history(days: int = 10) -> "list | dict":
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         worksheet = sh.sheet1
@@ -672,7 +672,7 @@ def get_wow_data(enable_demo: bool = False) -> pd.DataFrame:
         ])
 
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         worksheet = sh.sheet1
@@ -732,7 +732,7 @@ def get_wow_data(enable_demo: bool = False) -> pd.DataFrame:
 @st.cache_data(ttl=3600)
 def get_lowest_weight() -> Optional[float]:
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         try:
@@ -762,7 +762,7 @@ def get_fasting_schedule() -> dict:
         "Sunday": {"start": "12:00", "end": "18:00"}
     }
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         try:
@@ -823,7 +823,7 @@ def get_fasting_status(schedule: dict) -> "tuple[str, Optional[float]]":
 
 def log_to_sheet(item: str, calories: int, protein: int, density: str, emoji: str = "🍽️") -> bool:
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         worksheet = sh.sheet1
@@ -847,7 +847,7 @@ def log_to_sheet(item: str, calories: int, protein: int, density: str, emoji: st
 @st.cache_data(ttl=600)
 def get_persistent_chat():
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         try:
@@ -880,7 +880,7 @@ def get_persistent_chat():
 
 def log_chat_to_sheet(role, content):
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         try:
@@ -906,7 +906,7 @@ def log_chat_to_sheet(role, content):
 
 def clear_persistent_chat():
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         worksheet = sh.worksheet(WS_CHAT_HISTORY)
@@ -920,7 +920,7 @@ def clear_persistent_chat():
 @st.cache_data(ttl=600)
 def get_custom_instructions():
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         try:
@@ -947,7 +947,7 @@ def get_custom_instructions():
 
 def save_user_goals(calories, protein):
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         try:
@@ -965,7 +965,7 @@ def save_user_goals(calories, protein):
 
 def save_fasting_schedule(schedule_dict):
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         try:
@@ -987,7 +987,7 @@ def save_fasting_schedule(schedule_dict):
 def get_user_goals() -> dict:
     default_goals = {"calories": 1500, "protein": 150}
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         try:
@@ -1034,7 +1034,7 @@ def _calculate_plan_effectiveness_legacy(calc_date=None, pre_sh=None, pre_goals=
         if pre_sh:
             sh = pre_sh
         else:
-            credentials_dict = dict(st.secrets["gcp_service_account"])
+            credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
             gc = gspread.service_account_from_dict(credentials_dict)
             sh = gc.open("Nutrition_Logs")
 
@@ -1258,7 +1258,7 @@ def _sync_plan_effectiveness_logs_legacy(force_resync=False):  # noqa: dead-code
     
     # st.toast("DEBUG: Sync Engine Started!", icon="🔄") # Removed noise, but will show result if forced
     try:
-        credentials_dict = dict(st.secrets["gcp_service_account"])
+        credentials_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
         gc = gspread.service_account_from_dict(credentials_dict)
         sh = gc.open("Nutrition_Logs")
         
